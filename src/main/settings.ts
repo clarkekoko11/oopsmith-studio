@@ -26,7 +26,12 @@ function defaults(): Stored {
 export function loadSettings(): Settings {
   let s: Stored = defaults();
   try {
-    s = { ...s, ...JSON.parse(readFileSync(settingsFile(), 'utf8')) };
+    const stored = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<Stored>;
+    for (const [k, v] of Object.entries(stored)) {
+      // blank values (e.g. saved by an older version) fall back to the defaults
+      if (typeof v === 'string' && !v.trim()) continue;
+      (s as unknown as Record<string, unknown>)[k] = v;
+    }
   } catch { /* first run */ }
   return { ...s, hasGeminiKey: existsSync(keyFile()) };
 }

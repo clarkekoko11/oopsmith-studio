@@ -45,6 +45,8 @@ export async function isCloneOf(dir: string, repo: string): Promise<boolean> {
 }
 
 export async function cloneToolkit(repo: string, dest: string, progress: (l: string) => void): Promise<GitResult> {
+  if (!repo.trim()) return { ok: false, message: 'Set the GitHub repo in Settings → Toolkit first.' };
+  if (!dest.trim()) return { ok: false, message: 'No local folder set for the toolkit.' };
   if (!(await gitAvailable())) return { ok: false, message: 'Git is not installed. Install it from git-scm.com, then try again.' };
   if (await isCloneOf(dest, repo)) return pullToolkit(dest);
   if (existsSync(dest) && readdirSync(dest).length) {
