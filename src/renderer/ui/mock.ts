@@ -68,5 +68,8 @@ export function mockApi(): StudioApi {
     openOutputFolder: async () => '~/Videos/RobloxShorts',
     openSetupLog: async () => '',
     onBoardChanged: () => () => {},
+    checkUpdate: async () => ({ available: true, behind: 2, changes: ['Phase 3: Reviewer desk', 'Fix board colours'], current: 'abc1234' }),
+    applyUpdate: async () => ({ ok: true, message: 'Updated (preview).' }),
+    onUpdate: (cb) => { setTimeout(() => cb({ available: true, behind: 2, changes: ['Phase 3: Reviewer desk', 'Fix board colours'], current: 'abc1234' }), 800); return () => {}; },
   };
 }

@@ -41,6 +41,9 @@ const api: StudioApi = {
   openOutputFolder: () => ipcRenderer.invoke('render:open-output'),
   openSetupLog: () => ipcRenderer.invoke('render:open-log'),
   onBoardChanged: (cb) => on('board:changed', () => cb()),
+  checkUpdate: () => ipcRenderer.invoke('update:check'),
+  applyUpdate: () => ipcRenderer.invoke('update:apply'),
+  onUpdate: (cb) => on('update', cb),
 };
 
 contextBridge.exposeInMainWorld('studio', api);

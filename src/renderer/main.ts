@@ -1,5 +1,5 @@
 // Wires the 3D office to the chat drawer, top bar and settings.
-import type { AccountState, AgentEvent, AgentId, AgentInfo, ChatItem, StudioApi, UsageState } from '../shared/types';
+import type { AccountState, AgentEvent, AgentId, AgentInfo, ChatItem, StudioApi, UpdateInfo, UsageState } from '../shared/types';
 import { Office, type CameraMode } from './office/game';
 import { renderMarkdown } from './ui/markdown';
 import { mockApi } from './ui/mock';
@@ -372,6 +372,32 @@ api.onSetup((p) => {
   void updateBanner(undefined, p.busy ? `Setting up rendering: ${p.activity}…` : null);
 });
 api.onBoardChanged(() => void loadBoard());
+
+// ---------------- self-update from GitHub
+function showUpdate(u: UpdateInfo) {
+  const chip = $('#updateChip');
+  const msg = $('#updateMsg');
+  const btn = $('#applyUpdate') as HTMLButtonElement;
+  chip.hidden = !(u.behind > 0 || u.busy);
+  chip.textContent = u.busy ? `⬆ ${u.busy}…` : `⬆ Update ready (${u.behind})`;
+  btn.hidden = !(u.behind > 0);
+  if (!u.available) msg.textContent = 'This copy is not a Git clone, so it cannot update itself. Re-install it with "git clone" (see README).';
+  else if (u.busy) msg.textContent = `Updating: ${u.busy}…`;
+  else if (u.error) msg.textContent = u.error;
+  else if (u.behind) msg.textContent = `${u.behind} new change${u.behind === 1 ? '' : 's'} on GitHub: ${u.changes.slice(0, 4).join(' · ')}`;
+  else msg.textContent = `Up to date${u.current ? ` (${u.current})` : ''}.`;
+}
+async function doUpdate() {
+  if (!confirm('Download the new version, rebuild and restart the app? Agents stop for a moment and pick up where they left off.')) return;
+  await api.applyUpdate();
+}
+api.onUpdate(showUpdate);
+$('#updateChip').addEventListener('click', () => void doUpdate());
+$('#applyUpdate').addEventListener('click', () => void doUpdate());
+$('#checkUpdate').addEventListener('click', async () => {
+  $('#updateMsg').textContent = 'Checking…';
+  showUpdate(await api.checkUpdate());
+});
 $('#model').addEventListener('change', (e) => api.saveSettings({ scriptWriterModel: (e.target as HTMLSelectElement).value }));
 $('#python').addEventListener('change', (e) => api.saveSettings({ pythonCommand: (e.target as HTMLInputElement).value.trim() || 'python' }));
 const geminiMsg = (r: { ok: boolean; message: string }) => {

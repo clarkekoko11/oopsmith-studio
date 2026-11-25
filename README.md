@@ -19,10 +19,19 @@ The app never sees your Claude password or token.
 
 ## Install and run
 ```powershell
+git clone https://github.com/clarkekoko11/oopsmith-studio.git
 cd oopsmith-studio
 npm install
 npm start
 ```
+Install from GitHub with `git clone` (not a zip) so the app can update itself.
+
+## Updates
+The app checks GitHub when it starts and every 3 hours. When there's a new version, a green
+**⬆ Update ready** chip appears in the top bar (also Settings → App updates). Click it: the app pulls the
+new version, re-installs packages if they changed, rebuilds and restarts. Settings, chats and your Claude
+login are kept (they live in `%APPDATA%\Oopsmith Studio`, not in the app folder).
+Don't edit files in the app folder by hand, or updates will stop until you undo those changes.
 `npm install` downloads Electron and the Claude Code engine for Windows (a few hundred MB, first time only).
 
 ## First run (about 2 minutes)

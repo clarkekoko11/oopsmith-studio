@@ -70,6 +70,15 @@ export interface Settings {
   renderReady: boolean;
 }
 
+export interface UpdateInfo {
+  available: boolean;
+  behind: number;
+  changes: string[];
+  busy?: string;
+  error?: string;
+  current?: string;
+}
+
 export interface ShortRow {
   id: string;
   title: string;
@@ -110,4 +119,7 @@ export interface StudioApi {
   openOutputFolder(): Promise<string>;
   openSetupLog(): Promise<string>;
   onBoardChanged(cb: () => void): () => void;
+  checkUpdate(): Promise<UpdateInfo>;
+  applyUpdate(): Promise<{ ok: boolean; message: string }>;
+  onUpdate(cb: (u: UpdateInfo) => void): () => void;
 }

@@ -9,6 +9,7 @@ import type { AccountState, AgentEvent, AgentId, ShortRow, UsageState } from '..
 import { checkAccount } from './account';
 import { DAILY_KICKOFF } from './agentDefs';
 import { Pipeline } from './pipeline';
+import { applyUpdate, checkForUpdate } from './updater';
 import { outputDir, setupRendering, stopJob } from './render';
 import { basename } from 'node:path';
 import { cloneToolkit, pullToolkit } from './git';
@@ -94,6 +95,20 @@ app.whenReady().then(() => {
 
   ipcMain.handle('agents:list', () => agents.list());
   ipcMain.handle('app:version', () => app.getVersion());
+  const checkUpdates = async () => {
+    const u = await checkForUpdate();
+    send('update', u);
+    return u;
+  };
+  ipcMain.handle('update:check', checkUpdates);
+  ipcMain.handle('update:apply', async () => {
+    agents.closeAll();
+    const r = await applyUpdate((step) => send('update', { available: true, behind: 0, changes: [], busy: step }));
+    if (!r.ok) send('update', { available: true, behind: 0, changes: [], error: r.message });
+    return r;
+  });
+  setTimeout(() => void checkUpdates(), 8000);
+  setInterval(() => void checkUpdates(), 3 * 60 * 60 * 1000);
   ipcMain.handle('agents:daily', () => runDaily('manual'));
   ipcMain.handle('agents:history', (_e, id: AgentId) => agents.history(id));
   ipcMain.handle('agents:send', (_e, id: AgentId, text: string) => agents.send(id, text));

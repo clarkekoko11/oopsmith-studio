@@ -16,6 +16,7 @@
     <div id="usage" class="chip usage" title="Claude plan usage in the current window" hidden>
       <span class="label">Plan usage</span><span class="meter"><i></i></span><span class="val"></span>
     </div>
+    <button id="updateChip" class="chip update" hidden title="A new version is on GitHub">⬆ Update</button>
     <button id="autopilot" class="chip toggle" title="Autopilot: agents decide everything themselves and never ask you">Autopilot <b>ON</b></button>
     <button id="runToday" class="chip run" title="Scripty makes today's Short from start to finish">▶ Make today's Short</button>
     <div class="seg" id="camseg" role="tablist" aria-label="Camera">
@@ -127,6 +128,12 @@
         <label>Python command
           <input id="python" placeholder="python" />
         </label>
+      </section>
+
+      <section>
+        <h3>App updates</h3>
+        <p class="muted small" id="updateMsg">The app checks GitHub for a new version when it starts and every few hours.</p>
+        <div class="field"><button class="ghost" id="checkUpdate">Check for updates</button><button class="ghost" id="applyUpdate" hidden>Update and restart</button></div>
       </section>
 
       <div class="actions"><button id="closeSettings">Done</button></div>
