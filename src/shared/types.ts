@@ -52,6 +52,8 @@ export interface UsageState {
 }
 
 export interface Settings {
+  /** GitHub repo the toolkit is cloned from, e.g. clarkekoko11/roblox-shorts-toolkit */
+  toolkitRepo: string;
   toolkitPath: string;
   scriptWriterModel: string; // '' = account default
   pythonCommand: string; // 'python' on Windows, 'python3' elsewhere
@@ -86,6 +88,9 @@ export interface StudioApi {
   setGeminiKey(key: string): Promise<{ ok: boolean; message: string }>;
   testGeminiKey(): Promise<{ ok: boolean; message: string }>;
   pickToolkitFolder(): Promise<string | null>;
+  cloneToolkit(): Promise<{ ok: boolean; message: string }>;
+  syncToolkit(): Promise<{ ok: boolean; message: string }>;
+  onToolkit(cb: (s: { busy: boolean; ok?: boolean; message: string }) => void): () => void;
 
   listShorts(): Promise<ShortRow[]>;
   fileUrl(relPath: string): Promise<string | null>;

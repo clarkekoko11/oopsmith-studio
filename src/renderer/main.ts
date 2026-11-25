@@ -243,15 +243,16 @@ function showAccount(a: AccountState) {
   updateBanner(a);
 }
 let lastAccount: AccountState | null = null;
-async function updateBanner(a: AccountState | null = lastAccount) {
+async function updateBanner(a: AccountState | null = lastAccount, busyMsg: string | null = null) {
   lastAccount = a;
   const s = await api.getSettings();
   const b = $('#banner');
   const msgs: string[] = [];
   if (a?.checked && !a.signedIn) msgs.push('Sign in to Claude Code on this PC so the agents can work.');
   if (a?.apiKeyInEnv) msgs.push('An ANTHROPIC_API_KEY is set on this PC. The app ignores it and uses your Claude plan login.');
-  if (!s.toolkitPath) msgs.push('Choose your roblox-shorts-toolkit folder.');
-  else if (!s.hasGeminiKey) msgs.push('Add your Gemini API key so Scripty can make voiceovers.');
+  if (busyMsg) msgs.unshift(busyMsg);
+  if (toolkitProblem) msgs.push(toolkitProblem);
+  else if (!toolkitBusy && !s.hasGeminiKey) msgs.push('Add your Gemini API key so Scripty can make voiceovers.');
   b.hidden = !msgs.length;
   if (msgs.length) {
     b.innerHTML = `<span>${msgs[0]}</span><button>Open settings</button>`;
@@ -275,6 +276,7 @@ api.onUsage((u: UsageState) => {
 async function openSettings() {
   const s = await api.getSettings();
   ($('#toolkitPath') as HTMLInputElement).value = s.toolkitPath;
+  ($('#toolkitRepo') as HTMLInputElement).value = s.toolkitRepo;
   ($('#model') as HTMLSelectElement).value = s.scriptWriterModel;
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
   ($('#geminiKey') as HTMLInputElement).value = '';
@@ -298,6 +300,22 @@ $('#pickToolkit').addEventListener('click', async () => {
     ($('#toolkitPath') as HTMLInputElement).value = p;
     void loadBoard();
   }
+});
+$('#toolkitRepo').addEventListener('change', (e) => api.saveSettings({ toolkitRepo: (e.target as HTMLInputElement).value.trim() }));
+$('#cloneToolkit').addEventListener('click', async () => {
+  await api.saveSettings({ toolkitRepo: ($('#toolkitRepo') as HTMLInputElement).value.trim() });
+  await api.cloneToolkit();
+});
+let toolkitBusy = false;
+let toolkitProblem: string | null = null;
+api.onToolkit((t) => {
+  toolkitBusy = t.busy;
+  const m = $('#toolkitMsg');
+  m.textContent = t.message;
+  m.className = `muted small ${t.busy ? '' : t.ok ? 'ok-text' : 'bad-text'}`;
+  toolkitProblem = !t.busy && t.ok === false ? t.message : null;
+  if (!t.busy && t.ok) void loadBoard();
+  void updateBanner(undefined, t.busy ? t.message : null);
 });
 $('#model').addEventListener('change', (e) => api.saveSettings({ scriptWriterModel: (e.target as HTMLSelectElement).value }));
 $('#python').addEventListener('change', (e) => api.saveSettings({ pythonCommand: (e.target as HTMLInputElement).value.trim() || 'python' }));

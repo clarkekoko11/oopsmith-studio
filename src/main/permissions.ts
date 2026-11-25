@@ -11,7 +11,8 @@ const SAFE_COMMANDS: RegExp[] = [
   /^(python3?|py)\s+tools[\\/](shorts|voiceover|transcribe)\.py(\s|$)/,
   /^ffmpeg\s/,
   /^ffprobe\s/,
-  /^git\s+(status|diff|log|show|add|commit)(\s|$)/,
+  /^git\s+(status|diff|log|show|add|commit|pull)(\s|$)/,
+  /^git\s+push(\s+origin(\s+[\w./-]+)?)?$/, // plain push to your toolkit repo only
   /^(ls|dir|pwd|cat|type|head|tail|wc|mkdir)(\s|$)/,
 ];
 

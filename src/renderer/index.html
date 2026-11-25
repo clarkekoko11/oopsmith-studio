@@ -66,8 +66,13 @@
       </section>
 
       <section>
-        <h3>Toolkit folder</h3>
-        <div class="field"><input id="toolkitPath" readonly placeholder="Choose your roblox-shorts-toolkit folder" /><button class="ghost" id="pickToolkit">Choose…</button></div>
+        <h3>Toolkit</h3>
+        <p class="muted small">The app clones your toolkit from GitHub and pulls the latest version every time it starts. Agents save their work into this clone.</p>
+        <label class="small muted" for="toolkitRepo">GitHub repo</label>
+        <div class="field"><input id="toolkitRepo" placeholder="owner/repo" /><button class="ghost" id="cloneToolkit">Clone / update</button></div>
+        <label class="small muted" for="toolkitPath">Local folder</label>
+        <div class="field"><input id="toolkitPath" readonly /><button class="ghost" id="pickToolkit">Use another folder…</button></div>
+        <p class="muted small" id="toolkitMsg"></p>
       </section>
 
       <section>

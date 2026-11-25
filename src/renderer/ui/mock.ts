@@ -4,7 +4,7 @@ import type { AgentEvent, AgentId, AgentInfo, ChatItem, Settings, StudioApi } fr
 export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
   const hist: Record<string, ChatItem[]> = { 'script-writer': [] };
-  let settings: Settings = { toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: '', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown' };
+  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: '', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown' };
   const agents: AgentInfo[] = [
     { id: 'script-writer', name: 'Scripty', role: 'Script Writer', phase: 1, status: 'idle' },
     { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'offline', activity: 'arrives in Phase 2' },
@@ -56,6 +56,9 @@ export function mockApi(): StudioApi {
     setGeminiKey: async () => ({ ok: true, message: 'Gemini key saved.' }),
     testGeminiKey: async () => ({ ok: true, message: 'Key works (preview).' }),
     pickToolkitFolder: async () => null,
+    cloneToolkit: async () => ({ ok: true, message: 'Cloned (preview).' }),
+    syncToolkit: async () => ({ ok: true, message: 'Toolkit is up to date.' }),
+    onToolkit: () => () => {},
     listShorts: async () => [{ id: 'RS-0001', title: 'This 10-Foot Lake Swallowed a 15-Story Oil Rig', status: 'delivered', version: 2 }],
     fileUrl: async () => null,
   };

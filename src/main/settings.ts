@@ -12,9 +12,11 @@ const keyFile = () => join(dir(), 'gemini.key');
 type Stored = Omit<Settings, 'hasGeminiKey'>;
 
 function defaults(): Stored {
-  const guess = join(homedir(), 'roblox-shorts-toolkit');
+  // reuse an existing clone (e.g. from the render worker setup), else clone into ~/OopsmithStudio
+  const existing = join(homedir(), 'roblox-shorts-toolkit');
   return {
-    toolkitPath: existsSync(guess) ? guess : '',
+    toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit',
+    toolkitPath: existsSync(existing) ? existing : join(homedir(), 'OopsmithStudio', 'roblox-shorts-toolkit'),
     scriptWriterModel: '',
     pythonCommand: process.platform === 'win32' ? 'python' : 'python3',
     cameraMode: 'topdown',

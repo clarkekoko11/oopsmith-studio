@@ -102,7 +102,7 @@ class AgentSession {
   async send(text: string) {
     const settings = loadSettings();
     if (!settings.toolkitPath || !existsSync(settings.toolkitPath)) {
-      this.notice('Pick your roblox-shorts-toolkit folder in Settings first.', 'warn');
+      this.notice("The toolkit isn't on this PC yet. Open Settings → Toolkit → Clone / update.", 'warn');
       return;
     }
     this.put({ kind: 'user', id: uid(), text, at: Date.now() });

@@ -28,6 +28,9 @@ const api: StudioApi = {
   setGeminiKey: (k) => ipcRenderer.invoke('settings:gemini', k),
   testGeminiKey: () => ipcRenderer.invoke('settings:gemini-test'),
   pickToolkitFolder: () => ipcRenderer.invoke('settings:pick-toolkit'),
+  cloneToolkit: () => ipcRenderer.invoke('toolkit:clone'),
+  syncToolkit: () => ipcRenderer.invoke('toolkit:sync'),
+  onToolkit: (cb) => on('toolkit', cb),
 
   listShorts: () => ipcRenderer.invoke('shorts:list'),
   fileUrl: (p) => ipcRenderer.invoke('file:url', p),

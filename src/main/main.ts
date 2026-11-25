@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AccountState, AgentEvent, AgentId, ShortRow, UsageState } from '../shared/types';
 import { checkAccount } from './account';
+import { cloneToolkit, pullToolkit } from './git';
 import { claudeExecutable } from './sdk';
 import { AgentManager } from './agents';
 import { inside } from './permissions';
@@ -111,6 +112,23 @@ app.whenReady().then(() => {
     return p;
   });
 
+  const toolkitStatus = (s: { busy: boolean; ok?: boolean; message: string }) => send('toolkit', s);
+  const doClone = async () => {
+    const s = loadSettings();
+    toolkitStatus({ busy: true, message: `Getting ${s.toolkitRepo} from GitHub…` });
+    const r = await cloneToolkit(s.toolkitRepo, s.toolkitPath, (line) => toolkitStatus({ busy: true, message: line.slice(0, 120) }));
+    toolkitStatus({ busy: false, ...r });
+    return r;
+  };
+  const doSync = async () => {
+    const s = loadSettings();
+    if (!existsSync(s.toolkitPath)) return doClone();
+    const r = await pullToolkit(s.toolkitPath);
+    toolkitStatus({ busy: false, ...r });
+    return r;
+  };
+  ipcMain.handle('toolkit:clone', doClone);
+  ipcMain.handle('toolkit:sync', doSync);
   ipcMain.handle('shorts:list', () => shorts());
   ipcMain.handle('file:url', (_e, rel: string) => {
     const root = loadSettings().toolkitPath;
@@ -127,6 +145,8 @@ app.whenReady().then(() => {
       app.quit();
     }, Number(process.env.OOPSMITH_SMOKE_MS ?? 12000));
   }
+  // get the latest toolkit: clone it on first run, pull it every start
+  win!.webContents.once('did-finish-load', () => void doSync());
   checkAccount().then((a) => {
     account = a;
     send('account', a);

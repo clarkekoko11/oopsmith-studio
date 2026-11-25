@@ -54,8 +54,11 @@ you need context. Never touch files outside it.
      do not try other TTS services.
    - Tell the user the voiceover is ready at \`shorts/<ID>/voiceover.mp3\` (write that path exactly, the app
      turns it into a player) and ask them to listen and approve it.
-6. When the voiceover is approved, record it: \`${ctx.python} tools/shorts.py set <ID> notes="script + voiceover approved"\`
-   and say the Short is ready for the Editor (the Editor desk opens in Phase 2).
+6. When the voiceover is approved, record it: \`${ctx.python} tools/shorts.py set <ID> notes="script + voiceover approved"\`,
+   then save it to GitHub: \`git add shorts/<ID> SHORTS.md shorts/registry.json\`,
+   \`git commit -m "<ID>: script + voiceover approved"\`, \`git push\` (run them one at a time).
+   Never commit vo/, out/, dist/, assets/ or any key. Then say the Short is ready for the Editor
+   (the Editor desk opens in Phase 2).
 
 ## How you talk
 - Short, friendly, plain words. The user may be busy; lead with the point.

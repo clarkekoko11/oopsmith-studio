@@ -9,8 +9,8 @@ The app never sees your Claude password or token.
 
 ## What you need (Windows)
 - **Node.js 20 or newer** — nodejs.org (LTS)
-- **Python 3** and **ffmpeg** on PATH (you already have these for the toolkit / render worker)
-- Your **roblox-shorts-toolkit** repo cloned on this PC
+- **Python 3**, **ffmpeg** and **Git** on PATH (you already have these for the render worker)
+- Git signed in to the GitHub account that owns `clarkekoko11/roblox-shorts-toolkit`
 - Your **Gemini API key** (Google AI Studio → Get API key) for voiceovers
 
 ## Install and run
@@ -25,7 +25,11 @@ npm start
 1. **Sign in to Claude:** click the account chip (top left) → **Sign in / switch…**. A terminal opens; type
    `/login`, sign in with your Pro account in the browser, close the terminal, then press **Check again**.
    The chip should show your email and "Pro".
-2. **Toolkit folder:** Settings → **Choose…** → pick your `roblox-shorts-toolkit` folder.
+2. **Toolkit:** nothing to do. On start the app clones `clarkekoko11/roblox-shorts-toolkit` from GitHub
+   (into `~\OopsmithStudio\roblox-shorts-toolkit`, or reuses `~\roblox-shorts-toolkit` if you already
+   have it) and pulls the latest version on every start after that. If you have uncommitted changes in it,
+   it leaves them alone. A different repo or folder can be set in Settings → Toolkit.
+   If GitHub asks you to sign in, a browser window from Git Credential Manager opens.
    The pipeline board on the back wall then lists your Shorts.
 3. **Gemini key:** paste it in Settings → **Save** → **Test key**. It's encrypted with Windows (DPAPI)
    and only handed to the voiceover tool while it runs.
@@ -51,8 +55,9 @@ creates the RS ID, saves `shorts/<ID>/script.txt`, makes the voiceover with Gemi
 promote, +3 st, 1.25x), and puts a player in the chat so you can listen.
 
 **What runs without asking:** reading files, web search, writing inside the toolkit folder, and the
-toolkit's own commands (`tools/shorts.py`, `tools/voiceover.py`, `ffmpeg`, `git status/add/commit`).
-**Asks you first:** anything else, such as `git push`, other commands, or writing outside the toolkit.
+toolkit's own commands (`tools/shorts.py`, `tools/voiceover.py`, `ffmpeg`, `git status/add/commit/pull`,
+and a plain `git push` to your toolkit repo — so each approved script + voiceover lands on GitHub).
+**Asks you first:** anything else, such as pushing somewhere else, other commands, or writing outside the toolkit.
 **Always blocked:** printing API keys, recursive deletes, force-push.
 
 ## Where things are saved
