@@ -20,6 +20,9 @@ function defaults(): Stored {
     scriptWriterModel: '',
     pythonCommand: process.platform === 'win32' ? 'python' : 'python3',
     cameraMode: 'topdown',
+    autopilot: true,
+    dailyTime: '09:00',
+    lastDailyRun: '',
   };
 }
 
@@ -29,7 +32,7 @@ export function loadSettings(): Settings {
     const stored = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<Stored>;
     for (const [k, v] of Object.entries(stored)) {
       // blank values (e.g. saved by an older version) fall back to the defaults
-      if (typeof v === 'string' && !v.trim()) continue;
+      if (typeof v === 'string' && !v.trim() && ['toolkitPath', 'toolkitRepo', 'pythonCommand'].includes(k)) continue;
       (s as unknown as Record<string, unknown>)[k] = v;
     }
   } catch { /* first run */ }

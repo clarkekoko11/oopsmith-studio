@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { SDKUserMessage, SDKMessage, Query } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentEvent, AgentId, AgentInfo, AgentStatus, ChatItem, UsageState } from '../shared/types';
-import { AGENTS, agentMeta, instructions } from './agentDefs';
+import { AGENTS, AUTOPILOT_TAG, agentMeta, instructions, PROMPT_VERSION } from './agentDefs';
 import { decide, describeTool, inside } from './permissions';
 import { agentEnv, claudeExecutable, loadSdk } from './sdk';
 import { getGeminiKey, loadSettings } from './settings';
@@ -65,17 +65,21 @@ class AgentSession {
     } catch { /* new */ }
   }
 
+  private readSessions(): Record<string, string | number> {
+    try { return JSON.parse(readFileSync(store('sessions.json'), 'utf8')); } catch { return {}; }
+  }
+  /** The saved session, only if it was made with the current instructions. */
   private get sessionId(): string | undefined {
-    try {
-      return JSON.parse(readFileSync(store('sessions.json'), 'utf8'))[this.id];
-    } catch {
-      return undefined;
-    }
+    const all = this.readSessions();
+    return all[`${this.id}:v`] === PROMPT_VERSION ? (all[this.id] as string | undefined) : undefined;
+  }
+  private get hasOutdatedSession(): boolean {
+    const all = this.readSessions();
+    return Boolean(all[this.id]) && all[`${this.id}:v`] !== PROMPT_VERSION;
   }
   private set sessionId(v: string | undefined) {
-    let all: Record<string, string> = {};
-    try { all = JSON.parse(readFileSync(store('sessions.json'), 'utf8')); } catch { /* none */ }
-    if (v) all[this.id] = v; else delete all[this.id];
+    const all = this.readSessions();
+    if (v) { all[this.id] = v; all[`${this.id}:v`] = PROMPT_VERSION; } else { delete all[this.id]; delete all[`${this.id}:v`]; }
     writeFileSync(store('sessions.json'), JSON.stringify(all, null, 2));
   }
 
@@ -99,16 +103,19 @@ class AgentSession {
     this.put({ kind: 'notice', id: uid(), text, tone, at: Date.now() });
   }
 
-  async send(text: string) {
+  /** display: what the chat shows (defaults to text). In autopilot the agent gets the autopilot tag. */
+  async send(text: string, display?: string): Promise<boolean> {
     const settings = loadSettings();
     if (!settings.toolkitPath || !existsSync(settings.toolkitPath)) {
       this.notice("The toolkit isn't on this PC yet. Open Settings → Toolkit → Clone / update.", 'warn');
-      return;
+      return false;
     }
-    this.put({ kind: 'user', id: uid(), text, at: Date.now() });
+    const tagged = settings.autopilot && !text.startsWith(AUTOPILOT_TAG) ? `${AUTOPILOT_TAG} ${text}` : text;
+    this.put({ kind: 'user', id: uid(), text: display ?? text.replace(AUTOPILOT_TAG, '').trim(), at: Date.now() });
     this.setStatus('working', 'thinking…');
     if (!this.inbox) await this.start();
-    this.inbox!.push(text);
+    this.inbox!.push(tagged);
+    return true;
   }
 
   private async start() {
@@ -117,6 +124,10 @@ class AgentSession {
     const { query } = await loadSdk();
     this.inbox = new Inbox();
     const resourcesDir = join(app.getAppPath(), 'resources');
+    if (this.hasOutdatedSession) {
+      this.notice(`${agentMeta(this.id).name} has new instructions, so this is a fresh conversation (older messages stay above).`);
+      this.sessionId = undefined;
+    }
     const append = instructions(this.id, {
       toolkit: root,
       python: settings.pythonCommand,
@@ -142,6 +153,11 @@ class AgentSession {
           if (d.kind === 'deny') {
             this.notice(`Blocked: ${d.why}`, 'warn');
             return { behavior: 'deny', message: d.why };
+          }
+          if (loadSettings().autopilot) {
+            // hands-off: never stop to ask; anything outside the safe list is skipped
+            this.notice(`Skipped (autopilot): ${d.why}`, 'info');
+            return { behavior: 'deny', message: 'Not allowed in autopilot. Find another way inside the toolkit, or skip this step and note it.' };
           }
           const allowed = await this.askPermission(d.why, describeTool(tool, input, root));
           return allowed
@@ -307,7 +323,8 @@ export class AgentManager {
     const m = agentMeta(id);
     return [{ kind: 'notice', id: 'offline', at: 0, text: `${m.name} the ${m.role} starts work in Phase ${m.phase}. Talk to Scripty at the Script Writer desk for now.` }];
   }
-  send(id: AgentId, text: string) { return this.sessions.get(id)?.send(text); }
+  send(id: AgentId, text: string, display?: string) { return this.sessions.get(id)?.send(text, display); }
+  isIdle(id: AgentId) { const s = this.sessions.get(id); return !!s && (s.status === 'idle' || s.status === 'error'); }
   stop(id: AgentId) { return this.sessions.get(id)?.stop(); }
   newChat(id: AgentId) { this.sessions.get(id)?.newChat(); }
   answer(id: AgentId, permId: string, allow: boolean) { this.sessions.get(id)?.answerPermission(permId, allow); }

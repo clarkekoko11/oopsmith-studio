@@ -46,7 +46,22 @@ office.onHint = (id) => {
 // ---------------- agents + chat
 office.onTalk = (id) => openChat(id);
 
+function showAutopilot(on: boolean) {
+  const b = $('#autopilot');
+  b.classList.toggle('on', on);
+  b.querySelector('b')!.textContent = on ? 'ON' : 'OFF';
+  ($('#autopilotBox') as HTMLInputElement).checked = on;
+}
+$('#autopilot').addEventListener('click', async () => {
+  const s = await api.saveSettings({ autopilot: !(await api.getSettings()).autopilot });
+  showAutopilot(s.autopilot);
+});
+$('#autopilotBox').addEventListener('change', async (e) => showAutopilot((await api.saveSettings({ autopilot: (e.target as HTMLInputElement).checked })).autopilot));
+$('#dailyTime').addEventListener('change', (e) => api.saveSettings({ dailyTime: (e.target as HTMLInputElement).value }));
+$('#runToday').addEventListener('click', () => void api.runDaily());
+
 function refreshAgent(a: AgentInfo) {
+  if (a.id === 'script-writer') ($('#runToday') as HTMLButtonElement).disabled = a.status === 'working' || a.status === 'needs-you';
   office.setAgentInfo(a.id, a.name, a.role, a.status, a.activity);
   if (open === a.id) {
     $('#chat .status').textContent = a.status === 'offline' ? 'not here yet' : a.activity && a.status !== 'idle' ? a.activity : a.status;
@@ -279,6 +294,8 @@ async function openSettings() {
   ($('#toolkitRepo') as HTMLInputElement).value = s.toolkitRepo;
   ($('#model') as HTMLSelectElement).value = s.scriptWriterModel;
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
+  ($('#dailyTime') as HTMLInputElement).value = s.dailyTime;
+  showAutopilot(s.autopilot);
   ($('#geminiKey') as HTMLInputElement).value = '';
   ($('#geminiKey') as HTMLInputElement).placeholder = s.hasGeminiKey ? '•••••••• saved (paste a new one to replace)' : 'Paste key from Google AI Studio';
   $('#geminiMsg').textContent = '';
@@ -354,6 +371,7 @@ async function loadBoard() {
   agents = await api.getAgents();
   agents.forEach(refreshAgent);
   showMode('topdown'); // always start in the Sims-style view
+  showAutopilot((await api.getSettings()).autopilot);
   await loadBoard();
   setInterval(loadBoard, 20000);
   void updateBanner();

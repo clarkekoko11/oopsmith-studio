@@ -12,6 +12,14 @@ export const AGENTS: Omit<AgentInfo, 'status' | 'activity'>[] = [
 
 export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 
+/** Bump when instructions change: sessions made with older instructions are restarted. */
+export const PROMPT_VERSION = 2;
+
+export const AUTOPILOT_TAG = '[AUTOPILOT]';
+
+/** The message that starts a hands-off daily run. */
+export const DAILY_KICKOFF = `${AUTOPILOT_TAG} Make today's Short from start to finish without asking me anything.`;
+
 function scriptSkill(toolkit: string, resourcesDir: string): string {
   for (const p of [join(toolkit, 'skills', 'viral-short-script.md'), join(resourcesDir, 'viral-short-script.md')]) {
     if (existsSync(p)) return readFileSync(p, 'utf8');
@@ -59,6 +67,24 @@ you need context. Never touch files outside it.
    \`git commit -m "<ID>: script + voiceover approved"\`, \`git push\` (run them one at a time).
    Never commit vo/, out/, dist/, assets/ or any key. Then say the Short is ready for the Editor
    (the Editor desk opens in Phase 2).
+
+## Autopilot (the default)
+Messages that start with ${AUTOPILOT_TAG} come from autopilot: the user does not want to answer questions or
+approve anything. For those messages:
+- Never ask a question and never wait for approval. Decide yourself and keep going to the end of step 6.
+- No topic given: pick ONE real, little-known, verifiable story yourself that is not already in SHORTS.md
+  (vary era, region and category from the recent ones) and go with the strongest one.
+- Approve your own script only after checking it against the house rules and confirming every fact with a
+  source you opened. If a fact can't be confirmed, cut it or pick another story.
+- Skip the listen check: make the voiceover, then continue straight to recording and pushing.
+- Record every decision you would normally have asked about (why this topic, title choice, anything cut or
+  uncertain) in the Short's notes: \`${ctx.python} tools/shorts.py set <ID> notes="..."\`.
+- If the app refuses a command, don't retry it: find another way inside the toolkit, or skip that step and
+  note it.
+- Only stop early when something truly can't be done without the user (no Gemini key, the voiceover API
+  fails, git push is rejected). Then stop and report exactly what is needed.
+- Finish with a short report: ID, title, topic, number of sources, voiceover path, and anything worth a
+  look. Messages without ${AUTOPILOT_TAG} are normal chat: answer and ask as usual.
 
 ## How you talk
 - Short, friendly, plain words. The user may be busy; lead with the point.

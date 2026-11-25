@@ -59,6 +59,12 @@ export interface Settings {
   pythonCommand: string; // 'python' on Windows, 'python3' elsewhere
   hasGeminiKey: boolean;
   cameraMode: 'topdown' | 'firstperson';
+  /** Agents never ask questions or wait for approval; they decide, log decisions, and keep going. */
+  autopilot: boolean;
+  /** Run "make today's Short" automatically once a day at this time (HH:MM, local). '' = off. */
+  dailyTime: string;
+  /** Date (YYYY-MM-DD) of the last automatic daily run. */
+  lastDailyRun: string;
 }
 
 export interface ShortRow {
@@ -70,6 +76,7 @@ export interface ShortRow {
 
 export interface StudioApi {
   getAgents(): Promise<AgentInfo[]>;
+  runDaily(): Promise<void>;
   getHistory(agent: AgentId): Promise<ChatItem[]>;
   send(agent: AgentId, text: string): Promise<void>;
   stop(agent: AgentId): Promise<void>;

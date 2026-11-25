@@ -4,7 +4,7 @@ import type { AgentEvent, AgentId, AgentInfo, ChatItem, Settings, StudioApi } fr
 export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
   const hist: Record<string, ChatItem[]> = { 'script-writer': [] };
-  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: '', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown' };
+  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: '', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '' };
   const agents: AgentInfo[] = [
     { id: 'script-writer', name: 'Scripty', role: 'Script Writer', phase: 1, status: 'idle' },
     { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'offline', activity: 'arrives in Phase 2' },
@@ -21,6 +21,7 @@ export function mockApi(): StudioApi {
   };
   return {
     getAgents: async () => agents,
+    runDaily: async () => {},
     getHistory: async (a) => (a === 'script-writer' ? hist[a] : [{ kind: 'notice', id: 'x', at: 0, text: 'Starts work in a later phase.' }]),
     async send(agent, text) {
       put(agent, { kind: 'user', id: uid(), text, at: Date.now() });

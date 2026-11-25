@@ -134,3 +134,12 @@ button.ghost { border: 1px solid var(--line); background: var(--panel-2); border
 .two label { display: flex; flex-direction: column; gap: 6px; font-size: 13px; font-weight: 600; }
 .actions { display: flex; justify-content: flex-end; padding-top: 10px; }
 .ok-text { color: var(--green) !important; } .bad-text { color: var(--pink) !important; }
+
+.chip.toggle b { color: var(--muted); }
+.chip.toggle.on { border-color: var(--yellow); }
+.chip.toggle.on b { color: var(--yellow); }
+.chip.run { background: var(--yellow); color: #1b1d29; font-weight: 800; border: 0; box-shadow: 0 4px 0 #b8901e; }
+.chip.run:disabled { opacity: 0.55; cursor: default; }
+.two label span { display: flex; align-items: center; gap: 8px; padding-top: 22px; }
+.two input[type="checkbox"] { flex: none; width: 18px; height: 18px; padding: 0; accent-color: var(--yellow); }
+.two label span { justify-content: flex-start; }

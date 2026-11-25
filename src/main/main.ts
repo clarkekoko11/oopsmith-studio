@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AccountState, AgentEvent, AgentId, ShortRow, UsageState } from '../shared/types';
 import { checkAccount } from './account';
+import { DAILY_KICKOFF } from './agentDefs';
 import { cloneToolkit, pullToolkit } from './git';
 import { claudeExecutable } from './sdk';
 import { AgentManager } from './agents';
@@ -75,6 +76,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('agents:list', () => agents.list());
+  ipcMain.handle('agents:daily', () => runDaily('manual'));
   ipcMain.handle('agents:history', (_e, id: AgentId) => agents.history(id));
   ipcMain.handle('agents:send', (_e, id: AgentId, text: string) => agents.send(id, text));
   ipcMain.handle('agents:stop', (_e, id: AgentId) => agents.stop(id));
@@ -152,6 +154,24 @@ app.whenReady().then(() => {
     send('account', a);
   });
 });
+
+// ---- daily autopilot run: once a day at settings.dailyTime (or the first time the app is open after it)
+const today = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
+async function runDaily(reason: 'manual' | 'schedule') {
+  if (!agents.isIdle('script-writer')) return;
+  const started = await agents.send('script-writer', DAILY_KICKOFF, reason === 'schedule' ? "Daily run: make today's Short" : "Make today's Short");
+  if (started && reason === 'schedule') saveSettings({ lastDailyRun: today() });
+}
+setInterval(() => {
+  const s = loadSettings();
+  if (!s.autopilot || !/^\d{1,2}:\d{2}$/.test(s.dailyTime) || s.lastDailyRun === today() || !account.signedIn) return;
+  const [h, m] = s.dailyTime.split(':').map(Number);
+  const now = new Date();
+  if (now.getHours() * 60 + now.getMinutes() >= h * 60 + m) void runDaily('schedule');
+}, 60_000);
 
 app.on('window-all-closed', () => {
   agents.closeAll();

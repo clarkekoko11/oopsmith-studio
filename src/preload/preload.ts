@@ -10,6 +10,7 @@ const on = <T>(channel: string, cb: (v: T) => void) => {
 
 const api: StudioApi = {
   getAgents: () => ipcRenderer.invoke('agents:list'),
+  runDaily: () => ipcRenderer.invoke('agents:daily'),
   getHistory: (a) => ipcRenderer.invoke('agents:history', a),
   send: (a, t) => ipcRenderer.invoke('agents:send', a, t),
   stop: (a) => ipcRenderer.invoke('agents:stop', a),

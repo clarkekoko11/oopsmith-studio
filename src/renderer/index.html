@@ -16,6 +16,8 @@
     <div id="usage" class="chip usage" title="Claude plan usage in the current window" hidden>
       <span class="label">Plan usage</span><span class="meter"><i></i></span><span class="val"></span>
     </div>
+    <button id="autopilot" class="chip toggle" title="Autopilot: agents decide everything themselves and never ask you">Autopilot <b>ON</b></button>
+    <button id="runToday" class="chip run" title="Scripty makes today's Short from start to finish">▶ Make today's Short</button>
     <div class="seg" id="camseg" role="tablist" aria-label="Camera">
       <button data-mode="topdown" role="tab">Top-down</button>
       <button data-mode="firstperson" role="tab">First person</button>
@@ -79,6 +81,18 @@
         <h3>Gemini API key <span class="muted small">(voiceovers)</span></h3>
         <div class="field"><input id="geminiKey" type="password" autocomplete="off" placeholder="Paste key from Google AI Studio" /><button class="ghost" id="saveGemini">Save</button><button class="ghost" id="testGemini">Test key</button></div>
         <p class="muted small" id="geminiMsg"></p>
+      </section>
+
+      <section>
+        <h3>Autopilot</h3>
+        <p class="muted small">On: agents never ask questions or wait for approval. They pick the story, approve their own work, write every decision into the Short's notes, and push to GitHub. Anything outside their safe list is skipped instead of asked.</p>
+        <div class="two">
+          <label><span><input type="checkbox" id="autopilotBox" /> Autopilot on</span></label>
+          <label>Make a Short every day at
+            <input id="dailyTime" type="time" />
+          </label>
+        </div>
+        <p class="muted small">The daily run starts at that time while the app is open, or as soon as you open it later that day. Clear the time to turn daily runs off.</p>
       </section>
 
       <section class="two">
