@@ -18,11 +18,13 @@ function defaults(): Stored {
     toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit',
     toolkitPath: existsSync(existing) ? existing : join(homedir(), 'OopsmithStudio', 'roblox-shorts-toolkit'),
     scriptWriterModel: '',
+    editorModel: '',
     pythonCommand: process.platform === 'win32' ? 'python' : 'python3',
     cameraMode: 'topdown',
     autopilot: true,
     dailyTime: '09:00',
     lastDailyRun: '',
+    renderReady: false,
   };
 }
 

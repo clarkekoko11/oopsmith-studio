@@ -1,8 +1,12 @@
-# Oopsmith Studio — Phase 1
+# Oopsmith Studio — Phase 2
 
-A walkable 3D office where AI agents make your Oopsmith Shorts. Phase 1 has the full office (Sims-style
-top-down view + first-person view) and one working agent: **Scripty, the Script Writer**. The Editor,
-Reviewer and Publisher desks are in place and come online in Phases 2–4.
+A walkable 3D office where AI agents make your Oopsmith Shorts. Two desks are working:
+**Scripty, the Script Writer** and **Cutter, the Editor**. The Reviewer and Publisher come online in Phases 3–4.
+
+**The pipeline (autopilot, no questions):** Scripty writes + voices a Short → status `voiced` → Cutter builds
+the cast, sets, story, sound and captions, runs the still checks → `ready_to_render` → the app renders it on
+your graphics card with the toolkit's render worker → `delivered` (video plays in Cutter's chat and lands in
+your video folder). A failed render goes back to Cutter with the error (up to 2 fixes per Short).
 
 Agents run on **your own Claude plan** (Pro) through the official Claude Code login on this PC.
 The app never sees your Claude password or token.
@@ -31,7 +35,12 @@ npm start
    it leaves them alone. A different repo or folder can be set in Settings → Toolkit.
    If GitHub asks you to sign in, a browser window from Git Credential Manager opens.
    The pipeline board on the back wall then lists your Shorts.
-3. **Gemini key:** paste it in Settings → **Save** → **Test key**. It's encrypted with Windows (DPAPI)
+3. **Rendering (one time, 10–20 min):** Settings → Rendering → **Set up rendering**. It runs
+   `tools/render_worker.py --setup` (Blender for Python, Playwright's browser, Remotion, base 3D assets)
+   and installs faster-whisper for transcribing voiceovers. If you already did this for the render worker,
+   it just re-checks quickly. Videos go to the worker's `output_dir` (default `~\Videos\RobloxShorts`).
+   If your PC render worker is also running in the background, stop it so the two don't render at once.
+4. **Gemini key:** paste it in Settings → **Save** → **Test key**. It's encrypted with Windows (DPAPI)
    and only handed to the voiceover tool while it runs.
 
 If you have an `ANTHROPIC_API_KEY` environment variable set, the app ignores it so your Pro plan is used,
@@ -69,6 +78,11 @@ and a plain `git push` to your toolkit repo — so each approved script + voiceo
 **Asks you first:** anything else, such as pushing somewhere else, other commands, or writing outside the toolkit.
 **Always blocked:** printing API keys, recursive deletes, force-push.
 
+## What Cutter may run without asking
+Everything Scripty may, plus the toolkit's own builders and scripts: `python tools|blender|audio/*.py`
+(including new set builders he writes into `blender/`) and `node tools/*.mjs`. Paths with `..` or outside the
+toolkit still ask (or are skipped in autopilot).
+
 ## Where things are saved
 `%APPDATA%\Oopsmith Studio\` — settings, encrypted Gemini key, chat history per desk, and the Claude
 session id (so Scripty remembers the conversation after a restart; **New chat** starts fresh).
@@ -89,7 +103,8 @@ src/renderer/    the 3D office (Three.js) and UI
 resources/       bundled copy of viral-short-script.md (the toolkit's copy wins if present)
 ```
 
-## Phase 1 limits
-- Only Scripty is live; the other desks show "arrives in Phase N".
+## Current limits
+- Scripty and Cutter are live; Hawk (Reviewer) and Pip (Publisher) show "arrives in Phase N".
+- One Short moves through the pipeline at a time. Building a Short uses a lot of Claude usage (many steps and still checks); on Pro, expect roughly one Short a day.
 - Plan usage appears in the top bar after the first message (it's reported with each reply).
 - Profiles / second-account switching is Phase 5; for now "Sign in / switch…" changes the one login.

@@ -1,5 +1,6 @@
 // Which tool calls an agent may make on its own, and which ones the app asks you about first.
 import { isAbsolute, relative, resolve } from 'node:path';
+import type { AgentId } from '../shared/types';
 
 export type Decision = { kind: 'allow' } | { kind: 'ask'; why: string } | { kind: 'deny'; why: string };
 
@@ -18,6 +19,13 @@ const SAFE_COMMANDS: RegExp[] = [
   /^(ls|dir|pwd|cat|type|head|tail|wc|mkdir|echo)(\s|$)/,
   /^(Get-Content|Get-ChildItem|Get-Location|Test-Path|Select-Object|Out-String|Write-Output|Write-Host)(\s|$)/i,
   /^New-Item\s+(-ItemType\s+Directory|-Type\s+Directory)/i,
+];
+
+// The Editor also runs the toolkit's own builders and scripts (including set builders it writes itself,
+// which stay inside the toolkit repo): python tools|blender|audio/*.py and node tools/*.mjs.
+const EDITOR_COMMANDS: RegExp[] = [
+  new RegExp(String.raw`^${PY}\s+(?:\.[\\/])?(?:tools|blender|audio)[\\/][\w.\\/-]+\.py(\s|$)`, 'i'),
+  /^node(\.exe)?\s+(?:\.[\\/])?tools[\\/][\w.-]+\.m?js(\s|$)/i,
 ];
 
 /** Split a shell line on && || ; | — but not inside quotes. */
@@ -57,7 +65,7 @@ export function inside(root: string, p: string): boolean {
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
 
-export function decide(tool: string, input: Record<string, unknown>, root: string): Decision {
+export function decide(tool: string, input: Record<string, unknown>, root: string, role: AgentId = 'script-writer'): Decision {
   if (READ_ONLY.has(tool)) return { kind: 'allow' };
 
   if (FILE_WRITERS.has(tool)) {
@@ -79,7 +87,8 @@ export function decide(tool: string, input: Record<string, unknown>, root: strin
     // harmless environment prefixes, e.g. PYTHONIOENCODING=utf-8 python tools/…
     // also PowerShell's call operator: & python …  /  & "C:\…\python.exe" …
     const bare = (p: string) => p.replace(/^&\s+/, '').replace(/^(?:(?:PYTHONIOENCODING|PYTHONUTF8)=\S+\s+)+/, '');
-    const ok = parts.length > 0 && parts.every((part) => SAFE_COMMANDS.some((re) => re.test(bare(part))));
+    const allowed = role === 'editor' ? SAFE_COMMANDS.concat(EDITOR_COMMANDS) : SAFE_COMMANDS;
+    const ok = parts.length > 0 && parts.every((part) => !/\.\.[\\/]/.test(part) && allowed.some((re) => re.test(bare(part))));
     if (ok && !subst) return { kind: 'allow' };
     return { kind: 'ask', why: `Run a command: ${cmd}` };
   }

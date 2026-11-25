@@ -4,13 +4,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { SDKUserMessage, SDKMessage, Query } from '@anthropic-ai/claude-agent-sdk';
 import type { AgentEvent, AgentId, AgentInfo, AgentStatus, ChatItem, UsageState } from '../shared/types';
-import { AGENTS, AUTOPILOT_TAG, agentMeta, instructions, PROMPT_VERSION } from './agentDefs';
+import { AGENTS, AUTOPILOT_TAG, agentMeta, instructions, LIVE_PHASE, PROMPT_VERSION } from './agentDefs';
 import { decide, describeTool, inside } from './permissions';
 import { agentEnv, claudeExecutable, loadSdk } from './sdk';
 import { getGeminiKey, loadSettings } from './settings';
 
 type Emit = (e: AgentEvent) => void;
 type UsageEmit = (u: UsageState) => void;
+type TurnEnd = (id: AgentId) => void;
+type NewItem = ChatItem extends infer T ? (T extends ChatItem ? Omit<T, 'id' | 'at'> : never) : never;
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const store = (...p: string[]) => join(app.getPath('userData'), ...p);
@@ -54,6 +56,10 @@ class AgentSession {
   private pendingPermissions = new Map<string, (allow: boolean) => void>();
   private saveTimer?: NodeJS.Timeout;
 
+  onTurnEnd: TurnEnd = () => {};
+  /** set while the app (not the agent) is busy for this desk, e.g. rendering */
+  external?: string;
+
   constructor(readonly id: AgentId, private emit: Emit, private usage: UsageEmit) {
     try {
       this.history = JSON.parse(readFileSync(store('history', `${id}.json`), 'utf8'));
@@ -83,7 +89,7 @@ class AgentSession {
     writeFileSync(store('sessions.json'), JSON.stringify(all, null, 2));
   }
 
-  private put(item: ChatItem) {
+  put(item: ChatItem) {
     const i = this.history.findIndex((h) => h.id === item.id);
     if (i >= 0) this.history[i] = item; else this.history.push(item);
     this.emit({ agent: this.id, type: 'upsert', item });
@@ -94,7 +100,11 @@ class AgentSession {
     mkdirSync(store('history'), { recursive: true });
     writeFileSync(store('history', `${this.id}.json`), JSON.stringify(this.history.slice(-400)));
   }
-  private setStatus(status: AgentStatus, activity?: string) {
+  setStatus(status: AgentStatus, activity?: string) {
+    if (this.external && status === 'idle') {
+      status = 'working';
+      activity = this.external;
+    }
     this.status = status;
     this.activity = activity;
     this.emit({ agent: this.id, type: 'status', status, activity });
@@ -139,16 +149,16 @@ class AgentSession {
       options: {
         cwd: root,
         resume: this.sessionId,
-        model: settings.scriptWriterModel || undefined,
+        model: (this.id === 'editor' ? settings.editorModel : settings.scriptWriterModel) || undefined,
         systemPrompt: { type: 'preset', preset: 'claude_code', append },
         settingSources: [],
         includePartialMessages: true,
         permissionMode: 'default',
         disallowedTools: ['AskUserQuestion', 'Agent', 'Task'],
         pathToClaudeCodeExecutable: claudeExecutable(),
-        env: agentEnv({ GEMINI_API_KEY: getGeminiKey(), PYTHONIOENCODING: 'utf-8' }),
+        env: agentEnv({ GEMINI_API_KEY: this.id === 'script-writer' ? getGeminiKey() : undefined, PYTHONIOENCODING: 'utf-8' }),
         canUseTool: async (tool, input) => {
-          const d = decide(tool, input, root);
+          const d = decide(tool, input, root, this.id);
           if (d.kind === 'allow') return { behavior: 'allow', updatedInput: input };
           if (d.kind === 'deny') {
             this.notice(`Blocked: ${d.why}`, 'warn');
@@ -261,6 +271,7 @@ class AgentSession {
           this.notice(`That turn ended early (${m.subtype})${errs?.length ? `: ${errs.join('; ')}` : ''}.`, 'warn');
         }
         this.setStatus('idle');
+        setTimeout(() => this.onTurnEnd(this.id), 0);
         return;
       }
       default:
@@ -269,7 +280,7 @@ class AgentSession {
   }
 
   /** Turn toolkit audio/video paths the agent mentions into players in the chat. */
-  private findMedia(text: string, root: string) {
+  findMedia(text: string, root: string) {
     const seen = new Set(this.history.filter((h) => h.kind === 'media').map((h) => (h as { path: string }).path));
     for (const match of text.matchAll(/[\w./\\-]+\.(mp3|wav|mp4)\b/g)) {
       const rel = match[0].replace(/^\.?[\\/]/, '');
@@ -309,11 +320,12 @@ export class AgentManager {
   private sessions = new Map<AgentId, AgentSession>();
   constructor(private emit: Emit, private usage: UsageEmit) {
     mkdirSync(store('history'), { recursive: true });
-    for (const a of AGENTS) if (a.phase === 1) this.sessions.set(a.id, new AgentSession(a.id, emit, usage));
+    for (const a of AGENTS) if (a.phase <= LIVE_PHASE) this.sessions.set(a.id, new AgentSession(a.id, emit, usage));
   }
   list(): AgentInfo[] {
     return AGENTS.map((a) => {
       const s = this.sessions.get(a.id);
+      if (s?.external && s.status === 'idle') return { ...a, status: 'working' as const, activity: s.external };
       return { ...a, status: s ? s.status : 'offline', activity: s ? s.activity : `arrives in Phase ${a.phase}` };
     });
   }
@@ -324,7 +336,20 @@ export class AgentManager {
     return [{ kind: 'notice', id: 'offline', at: 0, text: `${m.name} the ${m.role} starts work in Phase ${m.phase}. Talk to Scripty at the Script Writer desk for now.` }];
   }
   send(id: AgentId, text: string, display?: string) { return this.sessions.get(id)?.send(text, display); }
-  isIdle(id: AgentId) { const s = this.sessions.get(id); return !!s && (s.status === 'idle' || s.status === 'error'); }
+  isIdle(id: AgentId) { const s = this.sessions.get(id); return !!s && !s.external && (s.status === 'idle' || s.status === 'error'); }
+  onTurnEnd(cb: TurnEnd) { for (const s of this.sessions.values()) s.onTurnEnd = cb; }
+  /** Post something from the app itself into a desk's chat. */
+  post(id: AgentId, item: NewItem) {
+    this.sessions.get(id)?.put({ id: uid(), at: Date.now(), ...item } as ChatItem);
+  }
+  /** Mark a desk busy with app work (rendering); undefined clears it. */
+  setExternal(id: AgentId, activity: string | undefined) {
+    const s = this.sessions.get(id);
+    if (!s) return;
+    s.external = activity;
+    if (activity) s.setStatus('working', activity);
+    else s.setStatus('idle');
+  }
   stop(id: AgentId) { return this.sessions.get(id)?.stop(); }
   newChat(id: AgentId) { this.sessions.get(id)?.newChat(); }
   answer(id: AgentId, permId: string, allow: boolean) { this.sessions.get(id)?.answerPermission(permId, allow); }

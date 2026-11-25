@@ -11,11 +11,18 @@ const api: StudioApi = window.studio ?? mockApi();
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
 const COLORS: Record<AgentId, string> = { 'script-writer': '#ffb84d', editor: '#5ec8ff', reviewer: '#ff6b8b', publisher: '#7be07b' };
-const STARTERS = [
-  'Pitch me 3 little-known true stories about tiny mistakes.',
-  'Write a script about the Gimli Glider.',
-  'Which Shorts have we made so far?',
-];
+const STARTERS: Partial<Record<AgentId, string[]>> = {
+  'script-writer': [
+    'Pitch me 3 little-known true stories about tiny mistakes.',
+    'Write a script about the Gimli Glider.',
+    'Which Shorts have we made so far?',
+  ],
+  editor: ['What are you working on?', 'Build the latest voiced Short.', 'Why did the last render fail?'],
+};
+const BLURB: Partial<Record<AgentId, string>> = {
+  'script-writer': 'finds true stories, checks the facts, writes your script and makes the voiceover.',
+  editor: 'builds the cast, sets, story, sound and captions, checks the stills, and renders on your graphics card.',
+};
 
 let agents: AgentInfo[] = [];
 let open: AgentId | null = null;
@@ -146,8 +153,8 @@ function renderMessages() {
   if (!items.length && a && a.status !== 'offline') {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.innerHTML = `<b>${a.name}</b> finds true stories, checks the facts, writes your script and makes the voiceover.<div class="starters"></div>`;
-    for (const s of STARTERS) {
+    empty.innerHTML = `<b>${a.name}</b> ${BLURB[a.id] ?? ''}<div class="starters"></div>`;
+    for (const s of STARTERS[a.id] ?? []) {
       const b = document.createElement('button');
       b.textContent = s;
       b.onclick = () => sendText(s);
@@ -201,7 +208,8 @@ function upsertEl(it: ChatItem) {
       if (!fresh) break;
       el.className = 'media';
       el.textContent = it.path;
-      void api.fileUrl(it.path).then((url) => {
+      el.textContent = it.source === 'video' ? it.path.split(/[\\/]/).pop()! : it.path;
+      void api.fileUrl(it.path, it.source).then((url) => {
         if (!url) return;
         const m = document.createElement(it.path.endsWith('.mp4') ? 'video' : 'audio');
         m.controls = true;
@@ -268,6 +276,7 @@ async function updateBanner(a: AccountState | null = lastAccount, busyMsg: strin
   if (busyMsg) msgs.unshift(busyMsg);
   if (toolkitProblem) msgs.push(toolkitProblem);
   else if (!toolkitBusy && !s.hasGeminiKey) msgs.push('Add your Gemini API key so Scripty can make voiceovers.');
+  else if (!toolkitBusy && !s.renderReady) msgs.push('Set up rendering once so Cutter can build and render (Settings → Rendering).');
   b.hidden = !msgs.length;
   if (msgs.length) {
     b.innerHTML = `<span>${msgs[0]}</span><button>Open settings</button>`;
@@ -293,6 +302,8 @@ async function openSettings() {
   ($('#toolkitPath') as HTMLInputElement).value = s.toolkitPath;
   ($('#toolkitRepo') as HTMLInputElement).value = s.toolkitRepo;
   ($('#model') as HTMLSelectElement).value = s.scriptWriterModel;
+  ($('#editorModel') as HTMLSelectElement).value = s.editorModel;
+  $('#renderState').textContent = s.renderReady ? '· set up ✓' : '· not set up yet';
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
   ($('#dailyTime') as HTMLInputElement).value = s.dailyTime;
   showAutopilot(s.autopilot);
@@ -334,6 +345,21 @@ api.onToolkit((t) => {
   if (!t.busy && t.ok) void loadBoard();
   void updateBanner(undefined, t.busy ? t.message : null);
 });
+$('#editorModel').addEventListener('change', (e) => api.saveSettings({ editorModel: (e.target as HTMLSelectElement).value }));
+$('#setupRender').addEventListener('click', async () => {
+  ($('#setupRender') as HTMLButtonElement).disabled = true;
+  await api.setupRendering();
+  ($('#setupRender') as HTMLButtonElement).disabled = false;
+});
+$('#openOutput').addEventListener('click', () => void api.openOutputFolder());
+api.onSetup((p) => {
+  const m = $('#setupMsg');
+  m.textContent = p.busy ? `${p.activity}… ${p.line.slice(0, 110)}` : p.activity;
+  m.className = `muted small ${p.busy ? '' : p.ok ? 'ok-text' : 'bad-text'}`;
+  if (!p.busy && p.ok) $('#renderState').textContent = '· set up ✓';
+  void updateBanner(undefined, p.busy ? `Setting up rendering: ${p.activity}…` : null);
+});
+api.onBoardChanged(() => void loadBoard());
 $('#model').addEventListener('change', (e) => api.saveSettings({ scriptWriterModel: (e.target as HTMLSelectElement).value }));
 $('#python').addEventListener('change', (e) => api.saveSettings({ pythonCommand: (e.target as HTMLInputElement).value.trim() || 'python' }));
 const geminiMsg = (r: { ok: boolean; message: string }) => {

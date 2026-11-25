@@ -21,7 +21,7 @@ export type ChatItem =
   | { kind: 'tool'; id: string; text: string; at: number }
   | { kind: 'permission'; id: string; text: string; detail: string; at: number; state: 'pending' | 'allowed' | 'denied' }
   | { kind: 'notice'; id: string; text: string; at: number; tone?: 'info' | 'warn' | 'error' }
-  | { kind: 'media'; id: string; path: string; at: number };
+  | { kind: 'media'; id: string; path: string; at: number; /** 'video' = file in the render output folder */ source?: 'toolkit' | 'video' };
 
 export interface AgentEvent {
   agent: AgentId;
@@ -56,6 +56,7 @@ export interface Settings {
   toolkitRepo: string;
   toolkitPath: string;
   scriptWriterModel: string; // '' = account default
+  editorModel: string;
   pythonCommand: string; // 'python' on Windows, 'python3' elsewhere
   hasGeminiKey: boolean;
   cameraMode: 'topdown' | 'firstperson';
@@ -65,6 +66,8 @@ export interface Settings {
   dailyTime: string;
   /** Date (YYYY-MM-DD) of the last automatic daily run. */
   lastDailyRun: string;
+  /** render_worker.py --setup has finished on this PC */
+  renderReady: boolean;
 }
 
 export interface ShortRow {
@@ -101,5 +104,9 @@ export interface StudioApi {
   onToolkit(cb: (s: { busy: boolean; ok?: boolean; message: string }) => void): () => void;
 
   listShorts(): Promise<ShortRow[]>;
-  fileUrl(relPath: string): Promise<string | null>;
+  fileUrl(path: string, source?: 'toolkit' | 'video'): Promise<string | null>;
+  setupRendering(): Promise<{ ok: boolean; message: string }>;
+  onSetup(cb: (p: { busy: boolean; ok?: boolean; activity: string; line: string }) => void): () => void;
+  openOutputFolder(): Promise<string>;
+  onBoardChanged(cb: () => void): () => void;
 }

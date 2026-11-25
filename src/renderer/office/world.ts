@@ -180,7 +180,7 @@ export function buildOffice(scene: THREE.Scene) {
     g.fillStyle = '#8a91a8';
     g.font = '600 30px system-ui, sans-serif';
     g.fillText(`${rows.length} short${rows.length === 1 ? '' : 's'}`, 410, 90);
-    const stages = ['scripting', 'voiceover', 'building', 'rendering', 'review', 'approved', 'delivered'];
+    const stages = ['planned', 'voiced', 'building', 'ready', 'rendering', 'review', 'delivered'];
     g.font = '700 26px system-ui, sans-serif';
     stages.forEach((s, i) => {
       g.fillStyle = '#ffffff10';
@@ -206,7 +206,7 @@ export function buildOffice(scene: THREE.Scene) {
       g.font = '600 32px system-ui, sans-serif';
       const t = r.title.length > 52 ? r.title.slice(0, 51) + '…' : r.title;
       g.fillText(t, 250, y);
-      g.fillStyle = '#7be07b';
+      g.fillStyle = /failed/.test(r.status) ? '#ff6b8b' : /delivered|uploaded|published/.test(r.status) ? '#7be07b' : '#ffd34d';
       g.font = '700 28px system-ui, sans-serif';
       g.textAlign = 'right';
       g.fillText(`${r.status} · v${r.version}`, 1540, y);

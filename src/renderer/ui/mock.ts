@@ -4,10 +4,10 @@ import type { AgentEvent, AgentId, AgentInfo, ChatItem, Settings, StudioApi } fr
 export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
   const hist: Record<string, ChatItem[]> = { 'script-writer': [] };
-  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: '', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '' };
+  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: '', editorModel: '', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false };
   const agents: AgentInfo[] = [
     { id: 'script-writer', name: 'Scripty', role: 'Script Writer', phase: 1, status: 'idle' },
-    { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'offline', activity: 'arrives in Phase 2' },
+    { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'working', activity: 'RS-0003 · rendering frames 42%' },
     { id: 'reviewer', name: 'Hawk', role: 'Reviewer', phase: 3, status: 'offline', activity: 'arrives in Phase 3' },
     { id: 'publisher', name: 'Pip', role: 'Publisher', phase: 4, status: 'offline', activity: 'arrives in Phase 4' },
   ];
@@ -63,5 +63,9 @@ export function mockApi(): StudioApi {
     onToolkit: () => () => {},
     listShorts: async () => [{ id: 'RS-0001', title: 'This 10-Foot Lake Swallowed a 15-Story Oil Rig', status: 'delivered', version: 2 }],
     fileUrl: async () => null,
+    setupRendering: async () => ({ ok: true, message: 'Rendering is set up (preview).' }),
+    onSetup: () => () => {},
+    openOutputFolder: async () => '~/Videos/RobloxShorts',
+    onBoardChanged: () => () => {},
   };
 }

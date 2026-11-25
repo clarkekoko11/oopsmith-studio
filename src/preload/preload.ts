@@ -35,7 +35,11 @@ const api: StudioApi = {
   onToolkit: (cb) => on('toolkit', cb),
 
   listShorts: () => ipcRenderer.invoke('shorts:list'),
-  fileUrl: (p) => ipcRenderer.invoke('file:url', p),
+  fileUrl: (p, src) => ipcRenderer.invoke('file:url', p, src),
+  setupRendering: () => ipcRenderer.invoke('render:setup'),
+  onSetup: (cb) => on('render:setup', cb),
+  openOutputFolder: () => ipcRenderer.invoke('render:open-output'),
+  onBoardChanged: (cb) => on('board:changed', () => cb()),
 };
 
 contextBridge.exposeInMainWorld('studio', api);

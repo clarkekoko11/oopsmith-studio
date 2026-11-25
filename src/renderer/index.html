@@ -95,6 +95,25 @@
         <p class="muted small">The daily run starts at that time while the app is open, or as soon as you open it later that day. Clear the time to turn daily runs off.</p>
       </section>
 
+      <section>
+        <h3>Rendering <span class="muted small" id="renderState"></span></h3>
+        <p class="muted small">Cutter renders on this PC's graphics card with your toolkit's render worker. Set it up once (10-20 minutes: Blender for Python, the browser renderer, Remotion, speech-to-text, base 3D assets).</p>
+        <div class="field"><button class="ghost" id="setupRender">Set up rendering</button><button class="ghost" id="openOutput">Open video folder</button></div>
+        <p class="muted small" id="setupMsg"></p>
+      </section>
+
+      <section class="two">
+        <label>Editor model
+          <select id="editorModel">
+            <option value="">Account default</option>
+            <option value="opus">Opus (best results)</option>
+            <option value="sonnet">Sonnet (balanced)</option>
+            <option value="haiku">Haiku (lightest)</option>
+          </select>
+        </label>
+        <span></span>
+      </section>
+
       <section class="two">
         <label>Script Writer model
           <select id="model">
