@@ -1,7 +1,7 @@
 // Electron main process: window, IPC, settings, account check and agents.
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron';
 import { spawn } from 'node:child_process';
-import { writeFileSync } from 'node:fs';
+import { appendFileSync, writeFileSync } from 'node:fs';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -152,12 +152,24 @@ app.whenReady().then(() => {
   ipcMain.handle('shorts:list', () => shorts());
   ipcMain.handle('render:setup', async () => {
     const s = loadSettings();
-    const r = await setupRendering(s.pythonCommand, s.toolkitPath, (activity, line) => send('render:setup', { busy: true, activity, line }));
+    const logFile = join(app.getPath('userData'), 'render-setup.log');
+    writeFileSync(logFile, `setup ${new Date().toISOString()}\n`);
+    const r = await setupRendering(
+      s.pythonCommand,
+      s.toolkitPath,
+      (activity, line) => {
+        try { appendFileSync(logFile, line + '\n'); } catch { /* ignore */ }
+        send('render:setup', { busy: true, activity, line });
+      },
+      (py) => saveSettings({ pythonCommand: py }),
+    );
+    try { appendFileSync(logFile, `RESULT: ${r.message}\n`); } catch { /* ignore */ }
     if (r.ok) saveSettings({ renderReady: true });
     send('render:setup', { busy: false, ok: r.ok, activity: r.message, line: '' });
     if (r.ok) void pipeline.tick();
     return r;
   });
+  ipcMain.handle('render:open-log', () => shell.openPath(join(app.getPath('userData'), 'render-setup.log')));
   ipcMain.handle('render:open-output', async () => {
     const dir = outputDir(loadSettings().toolkitPath);
     await shell.openPath(dir);

@@ -66,6 +66,7 @@ export function mockApi(): StudioApi {
     setupRendering: async () => ({ ok: true, message: 'Rendering is set up (preview).' }),
     onSetup: () => () => {},
     openOutputFolder: async () => '~/Videos/RobloxShorts',
+    openSetupLog: async () => '',
     onBoardChanged: () => () => {},
   };
 }

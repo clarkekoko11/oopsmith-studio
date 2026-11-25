@@ -11,11 +11,17 @@ type Progress = (activity: string, line: string) => void;
 let current: ChildProcess | undefined;
 export const renderBusy = () => Boolean(current);
 
-function runPython(python: string, cwd: string, args: string[], onLine: (l: string) => void): Promise<number> {
+/** "py -3.11" -> ["py", "-3.11"]; a quoted path stays one piece. */
+export function splitCmd(cmd: string): string[] {
+  return (cmd.match(/"[^"]+"|\S+/g) ?? ['python']).map((t) => t.replace(/^"|"$/g, ''));
+}
+
+function runPython(python: string, cwd: string, args: string[], onLine: (l: string) => void, track = true): Promise<number> {
+  const [exe, ...pre] = splitCmd(python);
   return new Promise((res) => {
     let p: ChildProcess;
     try {
-      p = spawn(python, args, {
+      p = spawn(exe, [...pre, ...args], {
         cwd,
         env: { ...process.env, PYTHONIOENCODING: 'utf-8', PYTHONUNBUFFERED: '1' },
         windowsHide: true,
@@ -25,7 +31,7 @@ function runPython(python: string, cwd: string, args: string[], onLine: (l: stri
       res(-1);
       return;
     }
-    current = p;
+    if (track) current = p;
     let buf = '';
     const take = (b: Buffer) => {
       buf += b.toString();
@@ -38,7 +44,7 @@ function runPython(python: string, cwd: string, args: string[], onLine: (l: stri
     p.on('error', (e) => { onLine(`could not start ${python}: ${e.message}`); });
     p.on('close', (code) => {
       if (buf.trim()) onLine(buf.trim());
-      current = undefined;
+      if (track) current = undefined;
       res(code ?? -1);
     });
   });
@@ -65,8 +71,60 @@ function stage(line: string, last: string): string {
   return last;
 }
 
-export async function setupRendering(python: string, toolkit: string, progress: Progress): Promise<JobResult> {
+/** Run a command quietly and collect its output. */
+async function capture(python: string, cwd: string, args: string[]): Promise<{ code: number; out: string }> {
+  let out = '';
+  const code = await runPython(python, cwd, args, (l) => (out += l + '\n'), false);
+  return { code, out };
+}
+
+function hasTool(tool: string): Promise<boolean> {
+  return new Promise((res) => {
+    const p = spawn(process.platform === 'win32' ? 'where' : 'which', [tool], { windowsHide: true });
+    p.on('error', () => res(false));
+    p.on('close', (c) => res(c === 0));
+  });
+}
+
+/**
+ * Blender-for-Python (bpy) only installs on one Python version (3.13 for Blender 5.x, 3.11 for 4.x LTS).
+ * Returns a Python command that can install it, trying the Windows "py" launcher's 3.13 / 3.11 when the
+ * configured one can't. null + message when none works.
+ */
+export async function findPythonForBpy(python: string, cwd: string, log: (l: string) => void): Promise<{ python: string | null; message: string }> {
+  const candidates = [python, ...(process.platform === 'win32' ? ['py -3.13', 'py -3.11'] : ['python3.13', 'python3.11'])].filter((c, i, a) => a.indexOf(c) === i);
+  let firstVersion = '';
+  for (const py of candidates) {
+    const v = await capture(py, cwd, ['-c', 'import sys; print("%d.%d" % sys.version_info[:2])']);
+    if (v.code !== 0) { log(`${py}: not found`); continue; }
+    const ver = v.out.trim().split('\n').pop()!;
+    firstVersion ||= ver;
+    const idx = await capture(py, cwd, ['-m', 'pip', 'index', 'versions', 'bpy']);
+    const ok = idx.code === 0 && /bpy \(\d/.test(idx.out);
+    log(`${py}: Python ${ver} — Blender for Python ${ok ? 'available' : 'not available for this version'}`);
+    if (ok) return { python: py, message: `Using ${py} (Python ${ver}).` };
+  }
+  return {
+    python: null,
+    message: `Blender for Python (bpy) only installs on one Python version — today that's Python 3.13 — and ${firstVersion ? `this PC's Python is ${firstVersion}` : 'no working Python was found'}. Install Python 3.13 from python.org (keep "py launcher" ticked), then press Set up rendering again — the app finds it by itself.`,
+  };
+}
+
+export async function setupRendering(pythonCmd: string, toolkit: string, progress: Progress, usePython: (py: string) => void): Promise<JobResult> {
   if (current) return { ok: false, message: 'Something is already running.' };
+  progress('checking this PC', 'Checking Git, ffmpeg, Node and Python…');
+  const missing: string[] = [];
+  for (const t of ['git', 'ffmpeg', 'node', 'npm']) if (!(await hasTool(t))) missing.push(t);
+  if (missing.length) {
+    return { ok: false, message: `Not installed or not on PATH: ${missing.join(', ')}. Install ${missing.join(' and ')} (see AUTOMATION.md in the toolkit), restart the app, and run setup again.` };
+  }
+  const found = await findPythonForBpy(pythonCmd, toolkit, (l) => progress('checking Python', l));
+  if (!found.python) return { ok: false, message: found.message };
+  const python = found.python;
+  if (python !== pythonCmd) {
+    usePython(python);
+    progress('checking Python', `Switched the Python command to "${python}" (Blender for Python needs it).`);
+  }
   let last = 'installing tools';
   progress(last, 'Setting up rendering…');
   const code = await runPython(python, toolkit, ['tools/render_worker.py', '--setup'], (l) => {
@@ -76,7 +134,7 @@ export async function setupRendering(python: string, toolkit: string, progress: 
     else last = stage(l, last);
     progress(last, l);
   });
-  if (code !== 0) return { ok: false, message: 'Setup failed. See the last lines above, fix it, and run setup again.' };
+  if (code !== 0) return { ok: false, message: 'Setup failed. The log below shows where; fix that and run setup again (finished parts are skipped).' };
   // the Editor also transcribes voiceovers (word timings for shots and captions)
   progress('installing speech-to-text', 'Installing faster-whisper…');
   const c2 = await runPython(python, toolkit, ['-m', 'pip', 'install', '--quiet', 'faster-whisper'], (l) => progress('installing speech-to-text', l));

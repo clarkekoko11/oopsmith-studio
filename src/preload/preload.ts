@@ -39,6 +39,7 @@ const api: StudioApi = {
   setupRendering: () => ipcRenderer.invoke('render:setup'),
   onSetup: (cb) => on('render:setup', cb),
   openOutputFolder: () => ipcRenderer.invoke('render:open-output'),
+  openSetupLog: () => ipcRenderer.invoke('render:open-log'),
   onBoardChanged: (cb) => on('board:changed', () => cb()),
 };
 

@@ -347,14 +347,26 @@ api.onToolkit((t) => {
 });
 $('#editorModel').addEventListener('change', (e) => api.saveSettings({ editorModel: (e.target as HTMLSelectElement).value }));
 $('#setupRender').addEventListener('click', async () => {
+  setupLines.length = 0;
   ($('#setupRender') as HTMLButtonElement).disabled = true;
   await api.setupRendering();
   ($('#setupRender') as HTMLButtonElement).disabled = false;
 });
 $('#openOutput').addEventListener('click', () => void api.openOutputFolder());
+$('#openLog').addEventListener('click', () => void api.openSetupLog());
+const setupLines: string[] = [];
 api.onSetup((p) => {
   const m = $('#setupMsg');
-  m.textContent = p.busy ? `${p.activity}… ${p.line.slice(0, 110)}` : p.activity;
+  m.textContent = p.busy ? `${p.activity}…` : p.activity;
+  if (p.line) {
+    setupLines.push(p.line);
+    if (setupLines.length > 60) setupLines.shift();
+  }
+  const log = $('#setupLog');
+  log.hidden = !setupLines.length;
+  log.textContent = setupLines.join('\n');
+  log.scrollTop = log.scrollHeight;
+  if (!p.busy) void api.getSettings().then((s) => (($('#python') as HTMLInputElement).value = s.pythonCommand));
   m.className = `muted small ${p.busy ? '' : p.ok ? 'ok-text' : 'bad-text'}`;
   if (!p.busy && p.ok) $('#renderState').textContent = '· set up ✓';
   void updateBanner(undefined, p.busy ? `Setting up rendering: ${p.activity}…` : null);

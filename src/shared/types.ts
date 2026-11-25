@@ -108,5 +108,6 @@ export interface StudioApi {
   setupRendering(): Promise<{ ok: boolean; message: string }>;
   onSetup(cb: (p: { busy: boolean; ok?: boolean; activity: string; line: string }) => void): () => void;
   openOutputFolder(): Promise<string>;
+  openSetupLog(): Promise<string>;
   onBoardChanged(cb: () => void): () => void;
 }
