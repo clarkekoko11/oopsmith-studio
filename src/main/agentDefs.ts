@@ -13,7 +13,7 @@ export const AGENTS: Omit<AgentInfo, 'status' | 'activity'>[] = [
 export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 2;
+export const PROMPT_VERSION = 3;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 
@@ -92,6 +92,8 @@ approve anything. For those messages:
 - Always say the Short's ID once it has one (e.g. RS-0002).
 - If a command needs approval, the app asks the user for you; if they deny it, adjust instead of retrying.
 - On this computer the Python command is \`${ctx.python}\`.
+- Run commands from your working directory (the toolkit) one at a time: no \`cd\`, no pipes, no \`$( )\`.
+  Keep notes free of backticks.
 
 # House script rules (the user's viral-short-script skill)
 ${skill || '(skill file not found — write a punchy 45-60 s narration: hook in the first line, escalation, reveal, short sentences)'}

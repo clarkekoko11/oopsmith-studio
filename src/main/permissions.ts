@@ -6,15 +6,40 @@ export type Decision = { kind: 'allow' } | { kind: 'ask'; why: string } | { kind
 const READ_ONLY = new Set(['Read', 'Glob', 'Grep', 'WebSearch', 'WebFetch', 'TodoWrite', 'ToolSearch']);
 const FILE_WRITERS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
 
-// One command (no && ; |) that the Script Writer may run without asking.
+// One command (after splitting on && ; |) that agents may run without asking.
+const PY = String.raw`(?:"?[\w:./\\ -]*?(?:python(?:3(?:\.\d+)?)?|py)(?:\.exe)?"?)(?:\s+-(?:[uBIEsSO]+|X\s*\S+|3(?:\.\d+)?))*`;
+const TOOL = String.raw`(?:\.[\\/])?tools[\\/](?:shorts|voiceover|transcribe|make_captions|sheet)\.py`;
 const SAFE_COMMANDS: RegExp[] = [
-  /^(python3?|py)\s+tools[\\/](shorts|voiceover|transcribe)\.py(\s|$)/,
-  /^ffmpeg\s/,
-  /^ffprobe\s/,
+  new RegExp(String.raw`^${PY}\s+${TOOL}(\s|$)`, 'i'),
+  /^ffmpeg(\.exe)?\s/i,
+  /^ffprobe(\.exe)?\s/i,
   /^git\s+(status|diff|log|show|add|commit|pull)(\s|$)/,
   /^git\s+push(\s+origin(\s+[\w./-]+)?)?$/, // plain push to your toolkit repo only
-  /^(ls|dir|pwd|cat|type|head|tail|wc|mkdir)(\s|$)/,
+  /^(ls|dir|pwd|cat|type|head|tail|wc|mkdir|echo)(\s|$)/,
 ];
+
+/** Split a shell line on && || ; | — but not inside quotes. */
+export function splitCommand(cmd: string): string[] {
+  const parts: string[] = [];
+  let cur = '', q: string | null = null;
+  for (let i = 0; i < cmd.length; i++) {
+    const c = cmd[i];
+    if (q) { if (c === q && cmd[i - 1] !== '\\') q = null; cur += c; continue; }
+    if (c === '"' || c === "'") { q = c; cur += c; continue; }
+    const two = cmd.slice(i, i + 2);
+    if (two === '&&' || two === '||') { parts.push(cur); cur = ''; i++; continue; }
+    if (c === ';' || (c === '|' && cmd[i + 1] !== '|')) { parts.push(cur); cur = ''; continue; }
+    cur += c;
+  }
+  parts.push(cur);
+  return parts.map((p) => p.trim().replace(/\s+\d?>&\d$|\s+\d?>\s*\/dev\/null$|\s+\d?>\s*nul$/i, '').trim()).filter(Boolean);
+}
+
+/** Text outside quotes (to look for command substitution that would really run). */
+function unquotedAndDouble(cmd: string): string {
+  // single-quoted text is literal in bash; double-quoted text still runs $( ) and backticks
+  return cmd.replace(/'[^']*'/g, "''");
+}
 
 const NEVER: [RegExp, string][] = [
   [/GEMINI_API_KEY|ANTHROPIC_API_KEY/, 'Commands may not read or print API keys.'],
@@ -42,9 +67,16 @@ export function decide(tool: string, input: Record<string, unknown>, root: strin
   if (tool === 'Bash') {
     const cmd = String(input.command ?? '').trim();
     for (const [re, why] of NEVER) if (re.test(cmd)) return { kind: 'deny', why };
-    const parts = cmd.split(/&&|\|\||;|\|/).map((s) => s.trim()).filter(Boolean);
-    const ok = parts.length > 0 && parts.every((part) => SAFE_COMMANDS.some((re) => re.test(part)));
-    if (ok && !/[`$]\(|`/.test(cmd) && !/\.\.[\\/]/.test(cmd)) return { kind: 'allow' };
+    const parts = splitCommand(cmd).filter((part) => {
+      // "cd <toolkit or a folder inside it>" is harmless: drop it before checking the rest
+      const m = part.match(/^cd\s+(?:\/d\s+)?["']?(.+?)["']?$/i);
+      return !(m && inside(root, m[1]));
+    });
+    const subst = /\$\(|`/.test(unquotedAndDouble(cmd));
+    // harmless environment prefixes, e.g. PYTHONIOENCODING=utf-8 python tools/…
+    const bare = (p: string) => p.replace(/^(?:(?:PYTHONIOENCODING|PYTHONUTF8)=\S+\s+)+/, '');
+    const ok = parts.length > 0 && parts.every((part) => SAFE_COMMANDS.some((re) => re.test(bare(part))));
+    if (ok && !subst) return { kind: 'allow' };
     return { kind: 'ask', why: `Run a command: ${cmd}` };
   }
 
