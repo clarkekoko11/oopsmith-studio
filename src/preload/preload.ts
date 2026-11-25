@@ -1,0 +1,36 @@
+// The only bridge between the office window and the main process.
+import { contextBridge, ipcRenderer } from 'electron';
+import type { AccountState, AgentEvent, StudioApi, UsageState } from '../shared/types';
+
+const on = <T>(channel: string, cb: (v: T) => void) => {
+  const fn = (_e: unknown, v: T) => cb(v);
+  ipcRenderer.on(channel, fn);
+  return () => ipcRenderer.removeListener(channel, fn);
+};
+
+const api: StudioApi = {
+  getAgents: () => ipcRenderer.invoke('agents:list'),
+  getHistory: (a) => ipcRenderer.invoke('agents:history', a),
+  send: (a, t) => ipcRenderer.invoke('agents:send', a, t),
+  stop: (a) => ipcRenderer.invoke('agents:stop', a),
+  newChat: (a) => ipcRenderer.invoke('agents:new', a),
+  answerPermission: (a, id, allow) => ipcRenderer.invoke('agents:permission', a, id, allow),
+  onEvent: (cb) => on<AgentEvent>('agent:event', cb),
+
+  getAccount: () => ipcRenderer.invoke('account:get'),
+  recheckAccount: () => ipcRenderer.invoke('account:recheck'),
+  openLogin: () => ipcRenderer.invoke('account:login'),
+  onAccount: (cb) => on<AccountState>('account', cb),
+  onUsage: (cb) => on<UsageState>('usage', cb),
+
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  saveSettings: (s) => ipcRenderer.invoke('settings:save', s),
+  setGeminiKey: (k) => ipcRenderer.invoke('settings:gemini', k),
+  testGeminiKey: () => ipcRenderer.invoke('settings:gemini-test'),
+  pickToolkitFolder: () => ipcRenderer.invoke('settings:pick-toolkit'),
+
+  listShorts: () => ipcRenderer.invoke('shorts:list'),
+  fileUrl: (p) => ipcRenderer.invoke('file:url', p),
+};
+
+contextBridge.exposeInMainWorld('studio', api);

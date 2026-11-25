@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; media-src 'self' toolkit: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'" />
+  <title>Oopsmith Studio</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div id="stage"></div>
+  <div id="tags"></div>
+
+  <header id="topbar">
+    <div class="brand"><span class="logo">O</span><b>OOPSMITH</b> STUDIO</div>
+    <button id="account" class="chip" title="Claude account">Checking Claude login…</button>
+    <div id="usage" class="chip usage" title="Claude plan usage in the current window" hidden>
+      <span class="label">Plan usage</span><span class="meter"><i></i></span><span class="val"></span>
+    </div>
+    <div class="seg" id="camseg" role="tablist" aria-label="Camera">
+      <button data-mode="topdown" role="tab">Top-down</button>
+      <button data-mode="firstperson" role="tab">First person</button>
+    </div>
+    <button id="settingsBtn" class="icon" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.3 7.3 0 0 0-1.69-.98l-.38-2.65A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.49.49 0 0 0 .12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66a.49.49 0 0 0-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.49.42h4c.25 0 .45-.18.49-.42l.38-2.65a7 7 0 0 0 1.69-.98l2.49 1.01c.22.08.49 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.66Z"/></svg>
+    </button>
+  </header>
+
+  <div id="banner" hidden></div>
+
+  <div id="help">
+    <div data-for="topdown"><b>Click</b> the floor to walk · <b>Click</b> an agent to talk · <b>Scroll</b> zoom · <b>Q/E</b> or right-drag rotate · <b>V</b> first person</div>
+    <div data-for="firstperson"><b>Click</b> to look around · <b>WASD</b> move · <b>Shift</b> run · <b>E</b> talk · <b>Esc</b> free mouse · <b>V</b> top-down</div>
+  </div>
+  <div id="crosshair"></div>
+  <div id="hint" hidden></div>
+
+  <aside id="chat" aria-hidden="true">
+    <div class="chat-head">
+      <div class="avatar"></div>
+      <div class="who"><div class="name"></div><div class="role"></div></div>
+      <span class="status"></span>
+      <button class="ghost" id="newChat" title="Start a new conversation">New chat</button>
+      <button class="icon" id="closeChat" title="Close (Esc)" aria-label="Close">✕</button>
+    </div>
+    <div class="messages" id="messages"></div>
+    <form class="composer" id="composer">
+      <textarea id="input" rows="2" placeholder="Ask Scripty for a story…"></textarea>
+      <div class="row">
+        <span class="tip">Enter to send · Shift+Enter new line</span>
+        <button type="button" id="stopBtn" class="ghost" hidden>Stop</button>
+        <button type="submit" id="sendBtn">Send</button>
+      </div>
+    </form>
+  </aside>
+
+  <div id="settings" class="modal" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="settingsTitle">
+      <h2 id="settingsTitle">Settings</h2>
+
+      <section>
+        <h3>Claude account</h3>
+        <p class="muted" id="acctDetail">Checking…</p>
+        <p class="muted small">Agents use the Claude account you signed in to with Claude Code on this PC — your Pro plan. To sign in or switch accounts, press <b>Sign in / switch</b>, type <code>/login</code> in the terminal that opens, then press <b>Check again</b>.</p>
+        <div class="field"><button class="ghost" id="loginBtn">Sign in / switch…</button><button class="ghost" id="recheck">Check again</button></div>
+        <p class="muted small" id="loginMsg"></p>
+      </section>
+
+      <section>
+        <h3>Toolkit folder</h3>
+        <div class="field"><input id="toolkitPath" readonly placeholder="Choose your roblox-shorts-toolkit folder" /><button class="ghost" id="pickToolkit">Choose…</button></div>
+      </section>
+
+      <section>
+        <h3>Gemini API key <span class="muted small">(voiceovers)</span></h3>
+        <div class="field"><input id="geminiKey" type="password" autocomplete="off" placeholder="Paste key from Google AI Studio" /><button class="ghost" id="saveGemini">Save</button><button class="ghost" id="testGemini">Test key</button></div>
+        <p class="muted small" id="geminiMsg"></p>
+      </section>
+
+      <section class="two">
+        <label>Script Writer model
+          <select id="model">
+            <option value="">Account default</option>
+            <option value="opus">Opus (best writing)</option>
+            <option value="sonnet">Sonnet (balanced)</option>
+            <option value="haiku">Haiku (lightest)</option>
+          </select>
+        </label>
+        <label>Python command
+          <input id="python" placeholder="python" />
+        </label>
+      </section>
+
+      <div class="actions"><button id="closeSettings">Done</button></div>
+    </div>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
