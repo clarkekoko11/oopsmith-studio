@@ -372,6 +372,7 @@ async function loadBoard() {
   agents.forEach(refreshAgent);
   showMode('topdown'); // always start in the Sims-style view
   showAutopilot((await api.getSettings()).autopilot);
+  $('#appVersion').textContent = 'v' + (await api.appVersion());
   await loadBoard();
   setInterval(loadBoard, 20000);
   void updateBanner();

@@ -16,6 +16,8 @@ const SAFE_COMMANDS: RegExp[] = [
   /^git\s+(status|diff|log|show|add|commit|pull)(\s|$)/,
   /^git\s+push(\s+origin(\s+[\w./-]+)?)?$/, // plain push to your toolkit repo only
   /^(ls|dir|pwd|cat|type|head|tail|wc|mkdir|echo)(\s|$)/,
+  /^(Get-Content|Get-ChildItem|Get-Location|Test-Path|Select-Object|Out-String|Write-Output|Write-Host)(\s|$)/i,
+  /^New-Item\s+(-ItemType\s+Directory|-Type\s+Directory)/i,
 ];
 
 /** Split a shell line on && || ; | — but not inside quotes. */
@@ -32,7 +34,7 @@ export function splitCommand(cmd: string): string[] {
     cur += c;
   }
   parts.push(cur);
-  return parts.map((p) => p.trim().replace(/\s+\d?>&\d$|\s+\d?>\s*\/dev\/null$|\s+\d?>\s*nul$/i, '').trim()).filter(Boolean);
+  return parts.map((p) => p.trim().replace(/(\s+(\d|\*)?>&\d|\s+(\d|\*)?>\s*(\/dev\/null|\$null|nul))+$/i, '').trim()).filter(Boolean);
 }
 
 /** Text outside quotes (to look for command substitution that would really run). */
@@ -42,7 +44,7 @@ function unquotedAndDouble(cmd: string): string {
 }
 
 const NEVER: [RegExp, string][] = [
-  [/GEMINI_API_KEY|ANTHROPIC_API_KEY/, 'Commands may not read or print API keys.'],
+  [/GEMINI_API_KEY|ANTHROPIC_API_KEY|Env:|Get-ChildItem\s+env|\bprintenv\b|^\s*(env|set)\s*$/i, 'Commands may not read or print API keys.'],
   [/\brm\s+-[a-z]*r[a-z]*f|\brm\s+-[a-z]*f[a-z]*r|\brmdir\s+\/s|\bdel\s+\/[sq]|Remove-Item\b.*-Recurse/i, 'Recursive deletes are blocked.'],
   [/git\s+push\b.*(--force|-f\b)/, 'Force-pushing is blocked.'],
   [/\b(curl|wget|Invoke-WebRequest)\b.*\|\s*(sh|bash|powershell|iex)/i, 'Running downloaded scripts is blocked.'],
@@ -64,17 +66,19 @@ export function decide(tool: string, input: Record<string, unknown>, root: strin
     return { kind: 'ask', why: `Write to a file outside the toolkit folder: ${p}` };
   }
 
-  if (tool === 'Bash') {
+  // On Windows, Claude Code may run commands with its PowerShell tool instead of Bash: same rules.
+  if (tool === 'Bash' || tool === 'PowerShell') {
     const cmd = String(input.command ?? '').trim();
     for (const [re, why] of NEVER) if (re.test(cmd)) return { kind: 'deny', why };
     const parts = splitCommand(cmd).filter((part) => {
       // "cd <toolkit or a folder inside it>" is harmless: drop it before checking the rest
-      const m = part.match(/^cd\s+(?:\/d\s+)?["']?(.+?)["']?$/i);
+      const m = part.match(/^(?:cd|Set-Location|sl|pushd)\s+(?:\/d\s+|-Path\s+|-LiteralPath\s+)?["']?(.+?)["']?$/i);
       return !(m && inside(root, m[1]));
     });
     const subst = /\$\(|`/.test(unquotedAndDouble(cmd));
     // harmless environment prefixes, e.g. PYTHONIOENCODING=utf-8 python tools/…
-    const bare = (p: string) => p.replace(/^(?:(?:PYTHONIOENCODING|PYTHONUTF8)=\S+\s+)+/, '');
+    // also PowerShell's call operator: & python …  /  & "C:\…\python.exe" …
+    const bare = (p: string) => p.replace(/^&\s+/, '').replace(/^(?:(?:PYTHONIOENCODING|PYTHONUTF8)=\S+\s+)+/, '');
     const ok = parts.length > 0 && parts.every((part) => SAFE_COMMANDS.some((re) => re.test(bare(part))));
     if (ok && !subst) return { kind: 'allow' };
     return { kind: 'ask', why: `Run a command: ${cmd}` };
@@ -101,7 +105,7 @@ export function describeTool(tool: string, input: Record<string, unknown>, root:
     case 'Edit': case 'MultiEdit': return `Editing ${rel(input.file_path)}`;
     case 'Glob': return `Looking for files: ${short(input.pattern)}`;
     case 'Grep': return `Searching files for: ${short(input.pattern)}`;
-    case 'Bash': return `Running: ${short(input.command)}`;
+    case 'Bash': case 'PowerShell': return `Running: ${short(input.command)}`;
     case 'TodoWrite': return 'Updating its to-do list';
     default: return `Using ${tool}`;
   }

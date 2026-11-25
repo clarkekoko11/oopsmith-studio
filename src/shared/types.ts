@@ -76,6 +76,7 @@ export interface ShortRow {
 
 export interface StudioApi {
   getAgents(): Promise<AgentInfo[]>;
+  appVersion(): Promise<string>;
   runDaily(): Promise<void>;
   getHistory(agent: AgentId): Promise<ChatItem[]>;
   send(agent: AgentId, text: string): Promise<void>;

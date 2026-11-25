@@ -21,6 +21,7 @@ export function mockApi(): StudioApi {
   };
   return {
     getAgents: async () => agents,
+    appVersion: async () => 'preview',
     runDaily: async () => {},
     getHistory: async (a) => (a === 'script-writer' ? hist[a] : [{ kind: 'notice', id: 'x', at: 0, text: 'Starts work in a later phase.' }]),
     async send(agent, text) {

@@ -76,6 +76,7 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('agents:list', () => agents.list());
+  ipcMain.handle('app:version', () => app.getVersion());
   ipcMain.handle('agents:daily', () => runDaily('manual'));
   ipcMain.handle('agents:history', (_e, id: AgentId) => agents.history(id));
   ipcMain.handle('agents:send', (_e, id: AgentId, text: string) => agents.send(id, text));

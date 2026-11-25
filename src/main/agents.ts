@@ -156,7 +156,7 @@ class AgentSession {
           }
           if (loadSettings().autopilot) {
             // hands-off: never stop to ask; anything outside the safe list is skipped
-            this.notice(`Skipped (autopilot): ${d.why}`, 'info');
+            this.notice(`Skipped (autopilot, ${tool} tool): ${d.why}`, 'warn');
             return { behavior: 'deny', message: 'Not allowed in autopilot. Find another way inside the toolkit, or skip this step and note it.' };
           }
           const allowed = await this.askPermission(d.why, describeTool(tool, input, root));
