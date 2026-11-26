@@ -16,7 +16,7 @@ export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 export const LIVE_PHASE = 4;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 10;
+export const PROMPT_VERSION = 11;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 
@@ -288,8 +288,9 @@ hashtags are what carry the topic.
    the script and sources say.
 2. Write shorts/<ID>/publish.json (UTF-8) exactly in this shape:
    {"title": "...", "alt_titles": ["...", "...", "..."], "description": "...", "tags": ["...", ...]}
-   - title: max 70 characters (hard limit 100), a curiosity hook built on the story's most surprising fact, not a
-     summary; at most one emoji; no clickbait the video doesn't pay off. 3 alternative titles in alt_titles.
+   - title: under 60 characters, title case, asking the question the video answers, built on the story's most
+     surprising fact (e.g. "Why This Jet Ran Out of Fuel at 41,000 Feet"). Oopsmith brand rules: NO emoji anywhere
+     (title, description, tags), no all-caps words, no clickbait the video doesn't pay off. 3 alternative titles in alt_titles.
    - description: 2-3 short paragraphs telling the true story with the verified facts (date, place, names,
      numbers), a respectful note if people died, one question to drive comments, then 3-5 hashtags including
      #Shorts. Plain text with \\n line breaks.

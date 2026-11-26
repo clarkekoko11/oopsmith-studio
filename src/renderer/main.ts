@@ -302,8 +302,11 @@ async function updateBanner(a: AccountState | null = lastAccount, busyMsg: strin
   else if (!toolkitBusy && !s.renderReady) msgs.push('Set up rendering once so Cutter can build and render (Settings → Rendering).');
   b.hidden = !msgs.length;
   if (msgs.length) {
-    b.innerHTML = `<span>${msgs[0]}</span><button>Open settings</button>`;
-    b.querySelector('button')!.onclick = openSettings;
+    const m = msgs[0];
+    const where = /Gemini/i.test(m) ? 'Voiceover' : /render/i.test(m) ? 'Rendering' : /Claude|ANTHROPIC/i.test(m) ? 'Account' : /Publishing|Buffer|YouTube/i.test(m) ? 'Publishing' : /toolkit|GitHub|clone/i.test(m) ? 'Toolkit' : undefined;
+    b.innerHTML = `<span></span><button>Open settings</button>`;
+    b.querySelector('span')!.textContent = m;
+    b.querySelector('button')!.onclick = () => void openSettings(where);
   }
 }
 api.onAccount(showAccount);
@@ -319,14 +322,29 @@ api.onUsage((u: UsageState) => {
   el.title = `Claude plan usage (${u.window?.replace('_', '-') ?? 'current window'})${u.resetsAt ? ` · resets ${new Date(u.resetsAt * (u.resetsAt < 1e12 ? 1000 : 1)).toLocaleString()}` : ''}`;
 });
 
-// ---------------- settings
-async function openSettings() {
+// ---------------- settings (side menu, one section at a time)
+const sections = [...document.querySelectorAll<HTMLElement>('.set-body section')];
+const navBox = $('.set-links');
+function showSection(title: string) {
+  for (const sec of sections) sec.classList.toggle('on', sec.dataset.title === title);
+  navBox.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.title === title));
+}
+for (const sec of sections) {
+  const b = document.createElement('button');
+  b.dataset.title = sec.dataset.title!;
+  b.textContent = sec.dataset.title!;
+  b.onclick = () => showSection(sec.dataset.title!);
+  navBox.appendChild(b);
+}
+showSection('Account');
+async function openSettings(section?: string) {
+  if (typeof section === 'string') showSection(section);
   const s = await api.getSettings();
   teams = await api.listTeams();
   const tm = teams.find((t) => t.id === active) ?? teams[0];
   ($('#toolkitPath') as HTMLInputElement).value = tm.toolkitPath;
   ($('#toolkitRepo') as HTMLInputElement).value = tm.toolkitRepo;
-  $('#toolkitTeam').textContent = teams.length > 1 ? `· ${tm.name}` : '';
+  $('#toolkitTeam').textContent = teams.length > 1 ? tm.name : '';
   ($('#model') as HTMLSelectElement).value = s.scriptWriterModel;
   ($('#editorModel') as HTMLSelectElement).value = s.editorModel;
   ($('#reviewerModel') as HTMLSelectElement).value = s.reviewerModel;
@@ -337,7 +355,7 @@ async function openSettings() {
   ($('#ytAuto') as HTMLInputElement).checked = s.youtubeAutoUpload;
   renderEffort(s.effort);
   void showPublishing();
-  $('#renderState').textContent = s.renderReady ? '· set up ✓' : '· not set up yet';
+  $('#renderState').textContent = s.renderReady ? 'Ready' : 'Not set up';
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
   ($('#dailyTime') as HTMLInputElement).value = s.dailyTime;
   showAutopilot(s.autopilot);
@@ -352,8 +370,8 @@ function closeSettings() {
   office.inputEnabled = !open;
   void updateBanner();
 }
-$('#settingsBtn').addEventListener('click', openSettings);
-$('#account').addEventListener('click', openSettings);
+$('#settingsBtn').addEventListener('click', () => void openSettings());
+$('#account').addEventListener('click', () => void openSettings('Account'));
 $('#closeSettings').addEventListener('click', closeSettings);
 $('#settings').addEventListener('click', (e) => { if (e.target === $('#settings')) closeSettings(); });
 $('#pickToolkit').addEventListener('click', async () => {
@@ -438,8 +456,8 @@ async function showPublishing() {
   $('#pubSchedule').hidden = s.publishVia === 'manual';
   if (s.publishVia === 'youtube') {
     const y = await api.youtubeStatus(active);
-    ($('#ytSignIn') as HTMLButtonElement).textContent = y.signedIn ? '2. Signed in ✓ (sign in again)' : '2. Sign in to YouTube';
-    ($('#ytSecret') as HTMLButtonElement).textContent = y.hasClientSecret ? '1. client_secret.json ✓ (replace)' : '1. Choose client_secret.json…';
+    ($('#ytSignIn') as HTMLButtonElement).textContent = y.signedIn ? '2. Signed in (sign in again)' : '2. Sign in to YouTube';
+    ($('#ytSecret') as HTMLButtonElement).textContent = y.hasClientSecret ? '1. client_secret.json saved (replace)' : '1. Choose client_secret.json…';
   }
   for (const f of HOST_FIELDS) ($(`#${f}`) as HTMLInputElement).value = s[f];
   ($('#mediaHost') as HTMLSelectElement).value = s.mediaHost;
@@ -454,13 +472,13 @@ async function showPublishing() {
   sel.value = s.bufferChannelId;
   const p = await api.publishingStatus(active);
   if (s.publishVia !== 'buffer') {
-    $('#pubState').textContent = s.publishVia === 'manual' ? '· you post' : p.missing ? '· not ready' : '· ready ✓';
+    $('#pubState').textContent = s.publishVia === 'manual' ? 'You post' : p.missing ? 'Not ready' : 'Ready';
     if (p.missing) pubMsg({ ok: false, message: `Still needed: ${p.missing}` });
     else pubMsg({ ok: true, message: '' });
     return;
   }
   ($('#bufferKey') as HTMLInputElement).placeholder = p.hasBufferKey ? '•••••••• saved (paste a new one to replace)' : 'Paste your Buffer API key';
-  $('#pubState').textContent = p.missing ? '· not ready' : '· ready ✓';
+  $('#pubState').textContent = p.missing ? 'Not ready' : 'Ready';
   if (p.missing) pubMsg({ ok: false, message: `Still needed: ${p.missing}` });
   else if (p.workerAutoUpload) pubMsg({ ok: false, message: "Your render worker is set to upload to YouTube by itself. Saving the Buffer key turns that off." });
 }
@@ -562,7 +580,7 @@ api.onSetup((p) => {
   log.scrollTop = log.scrollHeight;
   if (!p.busy) void api.getSettings().then((s) => (($('#python') as HTMLInputElement).value = s.pythonCommand));
   m.className = `muted small ${p.busy ? '' : p.ok ? 'ok-text' : 'bad-text'}`;
-  if (!p.busy && p.ok) $('#renderState').textContent = '· set up ✓';
+  if (!p.busy && p.ok) $('#renderState').textContent = 'Ready';
   void updateBanner(undefined, p.busy ? `Setting up rendering: ${p.activity}…` : null);
 });
 api.onBoardChanged((team) => void loadBoard(team || undefined));
@@ -573,7 +591,8 @@ function showUpdate(u: UpdateInfo) {
   const msg = $('#updateMsg');
   const btn = $('#applyUpdate') as HTMLButtonElement;
   chip.hidden = !(u.behind > 0 || u.busy);
-  chip.textContent = u.busy ? `⬆ ${u.busy}…` : `⬆ Update ready (${u.behind})`;
+  chip.querySelector('span')!.textContent = u.busy ? `${u.busy}…` : 'Update ready';
+  chip.title = u.busy ? u.busy : `${u.behind} new change${u.behind === 1 ? '' : 's'}: click to install and restart`;
   btn.hidden = !(u.behind > 0);
   if (!u.available) msg.textContent = 'This copy is not a Git clone, so it cannot update itself. Re-install it with "git clone" (see README).';
   else if (u.busy) msg.textContent = `Updating: ${u.busy}…`;
@@ -643,9 +662,24 @@ const NAMES: Record<string, string> = { 'script-writer': 'Scripty', editor: 'Cut
 function usageTable(byAgent: Partial<Record<string, TokenCount>>, total: TokenCount): string {
   const row = (name: string, t: TokenCount) =>
     `<tr><td>${name}</td><td>${fmt(t.input + t.output + t.cacheRead + t.cacheWrite)}</td><td>${fmt(t.output)}</td><td>${fmt(t.cacheRead)}</td><td>${t.steps}</td></tr>`;
-  return `<table class="usage-table"><tr><th>Tokens</th><th>Total</th><th>Written</th><th>From cache</th><th>Steps</th></tr>${Object.entries(byAgent)
+  return `<table class="usage-table"><tr><th>Desk</th><th>Total</th><th>Written</th><th>From cache</th><th>Steps</th></tr>${Object.entries(byAgent)
     .map(([k, t]) => row(NAMES[k] ?? k, t!))
-    .join('')}${row('<b>All desks</b>', total)}</table>`;
+    .join('')}${row('All desks', total)}</table>`;
+}
+/** status -> friendly label + colour group */
+const STATUS: Record<string, [string, string]> = {
+  new: ['New', ''], planned: ['Planned', ''], voiced: ['Voiced', 'wait'], building: ['Building', 'work'],
+  ready_to_render: ['Ready to render', 'wait'], rendering: ['Rendering', 'work'], render_failed: ['Render failed', 'bad'],
+  in_review: ['In review', 'wait'], reviewing: ['Reviewing', 'work'], changes_requested: ['Changes requested', 'bad'],
+  approved: ['Approved', 'good'], ready_to_publish: ['Ready to publish', 'good'], queued_buffer: ['Scheduled', 'good'],
+  draft_in_buffer: ['Draft in Buffer', 'wait'], uploaded_scheduled: ['Scheduled', 'good'], uploaded_private: ['Private on YouTube', 'wait'],
+  published: ['Published', 'good'], published_manual: ['Posted by you', 'good'], publish_failed: ['Publish failed', 'bad'], delivered: ['Delivered', 'wait'],
+};
+const statusLabel = (s: string) => STATUS[s]?.[0] ?? s.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+function setPill(el: HTMLElement, status: string) {
+  el.className = `pill ${STATUS[status]?.[1] ?? ''}${el.classList.contains('sm') ? ' sm' : ''}`;
+  el.textContent = statusLabel(status);
+  el.hidden = !status;
 }
 function renderReviewList() {
   const ul = $('#reviewList');
@@ -653,19 +687,32 @@ function renderReviewList() {
   for (const r of boardRows) {
     const li = document.createElement('li');
     li.className = r.id === reviewing ? 'on' : '';
-    li.innerHTML = `<b></b><span class="t"></span><div class="st"></div>`;
-    li.querySelector('b')!.textContent = r.id;
+    li.innerHTML = `<span class="id"></span><span class="pill sm"></span><span class="t"></span>`;
+    li.querySelector('.id')!.textContent = `${r.id} · v${r.version}`;
+    setPill(li.querySelector('.pill') as HTMLElement, r.status);
     li.querySelector('.t')!.textContent = r.title;
-    li.querySelector('.st')!.textContent = `${r.status} · v${r.version}${r.tokens ? ` · ${fmt(r.tokens)} tokens` : ''}`;
+    li.title = r.tokens ? `${fmt(r.tokens)} tokens` : '';
     li.onclick = () => void showReview(r.id);
     ul.appendChild(li);
   }
-  if (!boardRows.length) ul.innerHTML = '<li>No Shorts yet.</li>';
+  if (!boardRows.length) ul.innerHTML = '<li class="none">No Shorts yet.</li>';
 }
+// tabs on the review screen
+let rvTab = 'review';
+function showTab(t: string) {
+  rvTab = t;
+  document.querySelectorAll<HTMLButtonElement>('#rvTabs button').forEach((b) => b.classList.toggle('on', b.dataset.tab === t));
+  document.querySelectorAll<HTMLElement>('.rv-body [data-pane]').forEach((p) => (p.hidden = p.dataset.pane !== t));
+}
+document.querySelectorAll<HTMLButtonElement>('#rvTabs button').forEach((b) => (b.onclick = () => showTab(b.dataset.tab!)));
 async function showReview(id: string) {
   reviewing = id;
   renderReviewList();
   const info = await api.getReview(active, id);
+  const row = boardRows.find((r) => r.id === id);
+  $('#rvId').textContent = `${id}${row ? ` · v${row.version}` : ''}${teams.length > 1 ? ` · ${teamName(active)}` : ''}`;
+  $('#rvTitle').textContent = row?.title ?? id;
+  setPill($('#rvStatus'), info.status);
   const v = $('#reviewVideo') as HTMLVideoElement;
   v.hidden = !info.videoUrl;
   $('#noVideo').hidden = !!info.videoUrl;
@@ -675,11 +722,11 @@ async function showReview(id: string) {
   }
   const w = $('#reviewWaiting');
   w.hidden = !info.waiting;
-  w.querySelector('span')!.textContent = `${info.status ? info.status + ' · ' : ''}${info.waiting}`;
+  w.querySelector('span')!.textContent = info.waiting;
   ($('#sendOnBtn') as HTMLButtonElement).hidden = !/Waiting|Next in line|Rendered before/.test(info.waiting);
   const pb = $('#publishBox');
   pb.hidden = !info.publish && !info.inBuffer;
-  $('#publishText').innerHTML = info.publish ? renderMarkdown(info.publish) : '';
+  $('#noPublish').hidden = !pb.hidden;
   const up = $('#uploadBtn') as HTMLButtonElement;
   const via = (await api.getSettings()).publishVia;
   up.hidden = via === 'manual' || !/^(ready_to_publish|publish_failed)$/.test(info.status);
@@ -693,18 +740,23 @@ async function showReview(id: string) {
   ($('#postedAt') as HTMLInputElement).hidden = posted;
   ($('#unmarkPosted') as HTMLButtonElement).hidden = !posted;
   ($('#postedBox').querySelector('span') as HTMLElement).textContent = posted ? 'You posted this yourself.' : 'Posted it yourself?';
+  const decided = /approved|ready_to_publish|queued|uploaded|published|draft_in_buffer/.test(info.status);
+  ($('#approveBtn') as HTMLButtonElement).textContent = decided ? 'Approved' : 'Approve';
+  ($('#approveBtn') as HTMLButtonElement).disabled = decided;
   const pa = $('#postedAt') as HTMLInputElement;
   const d = info.publishAt ? new Date(info.publishAt) : new Date();
   pa.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-  $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review) : '<p>Hawk hasn\'t reviewed this one yet.</p>';
-  $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted small">No token data yet (counted from Phase 3 on).</p>';
+  // drop the review's own "# RS-0003 v1 review — APPROVED" heading: the header above already says it
+  $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review.replace(/^#\s+[^\n]*\n+/, '')) : '<p class="muted">Hawk hasn\'t reviewed this one yet.</p>';
+  $('#publishText').innerHTML = info.publish ? renderMarkdown(info.publish.replace(/^#\s+[^\n]*\n+/, '')) : '';
+  $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted">No token data for this Short yet.</p>';
   $('#reviewMsg').textContent = '';
 }
 async function openReview() {
   $('#review').hidden = false;
   office.inputEnabled = false;
   boardRows = await api.listShorts(active);
-  $('#reviewTitle').textContent = teams.length > 1 ? `Review screen · ${teamName(active)}` : 'Review screen';
+  $('#reviewTitle').textContent = teams.length > 1 ? teamName(active) : 'Review';
   renderReviewList();
   const first = boardRows.find((r) => r.file) ?? boardRows[0];
   if (first) await showReview(reviewing && boardRows.some((r) => r.id === reviewing) ? reviewing : first.id);
@@ -778,15 +830,11 @@ $('#changesBtn').addEventListener('click', () => void decide(false));
 
 // ---------------- thinking effort per desk
 function renderEffort(e: Record<AgentId, string> | undefined) {
-  const box = $('#effortBox');
-  box.innerHTML = '';
-  const labels: Record<AgentId, string> = { 'script-writer': 'Scripty (scripts)', editor: 'Cutter (editor)', reviewer: 'Hawk (reviewer)', publisher: 'Pip (publisher)' };
   const defaults: Record<AgentId, string> = { 'script-writer': 'high', editor: 'high', reviewer: 'medium', publisher: 'low' };
-  for (const id of Object.keys(labels) as AgentId[]) {
-    const l = document.createElement('label');
-    l.textContent = labels[id];
-    const sel = document.createElement('select');
-    for (const [v, t] of [['low', 'Low (cheapest)'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max (most tokens)']]) {
+  for (const sel of document.querySelectorAll<HTMLSelectElement>('select[data-effort]')) {
+    const id = sel.dataset.effort as AgentId;
+    sel.innerHTML = '';
+    for (const [v, t] of [['low', 'Low (fewest tokens)'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max (most tokens)']]) {
       const o = document.createElement('option');
       o.value = v;
       o.textContent = t;
@@ -797,8 +845,6 @@ function renderEffort(e: Record<AgentId, string> | undefined) {
       const cur = (await api.getSettings()).effort ?? defaults;
       await api.saveSettings({ effort: { ...cur, [id]: sel.value } as typeof cur });
     };
-    l.appendChild(sel);
-    box.appendChild(l);
   }
 }
 

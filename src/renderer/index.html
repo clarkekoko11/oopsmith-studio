@@ -11,30 +11,36 @@
   <div id="tags"></div>
 
   <header id="topbar">
-    <div class="brand"><img class="logo" src="assets/brand/mark.png" alt="" /><img class="wordmark" src="assets/brand/wordmark-reverse.png" alt="oopsmith" /><span>studio</span></div>
-    <button id="teamBtn" class="chip team" title="Teams: add, rename or remove production lines"><span class="swatch"></span><b>Team Oopsmith</b><span class="caret">▾</span></button>
-    <button id="account" class="chip" title="Claude account">Checking Claude login…</button>
-    <div id="usage" class="chip usage" title="Claude plan usage in the current window" hidden>
-      <span class="label">Plan usage</span><span class="meter"><i></i></span><span class="val"></span>
+    <div class="tb-group">
+      <div class="brand"><img class="logo" src="assets/brand/mark.png" alt="" /><img class="wordmark" src="assets/brand/wordmark-reverse.png" alt="oopsmith" /><span class="brand-sub">Studio</span></div>
+      <button id="teamBtn" class="tb-btn team" title="Teams: add, rename or remove production lines"><span class="swatch"></span><b>Team Oopsmith</b><svg class="chev" viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M6 9l6 6 6-6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </div>
-    <button id="updateChip" class="chip update" hidden title="A new version is on GitHub">⬆ Update</button>
-    <button id="autopilot" class="chip toggle" title="Autopilot: agents decide everything themselves and never ask you">Autopilot <b>ON</b></button>
-    <button id="reviewBtn" class="chip" title="Watch renders, read Hawk's reviews, approve or send back">🎬 Review</button>
-    <button id="runToday" class="chip run" title="Scripty makes today's Short from start to finish">▶ Make today's Short</button>
-    <div class="seg" id="camseg" role="tablist" aria-label="Camera">
-      <button data-mode="topdown" role="tab">Top-down</button>
-      <button data-mode="firstperson" role="tab">First person</button>
+    <div class="tb-group">
+      <button id="updateChip" class="tb-btn update" hidden title="A new version is ready"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Update</span></button>
+      <button id="autopilot" class="switch" role="switch" title="Autopilot: agents decide everything themselves and never ask you"><span class="track"><span class="knob"></span></span><span class="lbl">Autopilot</span><b hidden>ON</b></button>
+      <button id="reviewBtn" class="tb-btn" title="Watch renders, read Hawk's reviews, approve or send back"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg><span>Review</span></button>
+      <button id="runToday" class="tb-btn primary" title="Scripty makes today's Short from start to finish"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></svg><span>Make today's Short</span></button>
     </div>
-    <button id="settingsBtn" class="icon" title="Settings" aria-label="Settings">
-      <svg viewBox="0 0 24 24" width="20" height="20"><path fill="currentColor" d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.3 7.3 0 0 0-1.69-.98l-.38-2.65A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.49.49 0 0 0 .12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66a.49.49 0 0 0-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.49.42h4c.25 0 .45-.18.49-.42l.38-2.65a7 7 0 0 0 1.69-.98l2.49 1.01c.22.08.49 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.66Z"/></svg>
-    </button>
+    <div class="tb-group right">
+      <div class="acct-pill">
+        <button id="account" title="Claude account">Checking Claude login…</button>
+        <div id="usage" class="usage" title="Claude plan usage in the current window" hidden><span class="meter"><i></i></span><span class="val"></span></div>
+      </div>
+      <div class="seg" id="camseg" role="tablist" aria-label="Camera">
+        <button data-mode="topdown" role="tab" title="Top-down view" aria-label="Top-down view"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 3l9 5-9 5-9-5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><path d="M3 13l9 5 9-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg></button>
+        <button data-mode="firstperson" role="tab" title="First person (V)" aria-label="First person view"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="12" cy="12" r="3" fill="currentColor"/></svg></button>
+      </div>
+      <button id="settingsBtn" class="icon" title="Settings" aria-label="Settings">
+        <svg viewBox="0 0 24 24" width="19" height="19" aria-hidden="true"><path fill="currentColor" d="M12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm7.43-2.53c.04-.32.07-.64.07-.97s-.03-.66-.07-1l2.11-1.63a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.3 7.3 0 0 0-1.69-.98l-.38-2.65A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42l-.38 2.65c-.61.25-1.17.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.49.49 0 0 0 .12.64L4.57 11c-.04.34-.07.67-.07 1s.03.65.07.97l-2.11 1.66a.49.49 0 0 0-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1.01c.52.4 1.08.73 1.69.98l.38 2.65c.04.24.25.42.49.42h4c.25 0 .45-.18.49-.42l.38-2.65a7 7 0 0 0 1.69-.98l2.49 1.01c.22.08.49 0 .61-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.66Z"/></svg>
+      </button>
+    </div>
   </header>
 
   <div id="banner" hidden></div>
 
   <div id="help">
-    <div data-for="topdown"><b>Click</b> the floor to walk · <b>Click</b> an agent to talk · <b>Scroll</b> zoom · <b>Q/E</b> or right-drag rotate · <b>V</b> first person</div>
-    <div data-for="firstperson"><b>Click</b> to look around · <b>WASD</b> move · <b>Shift</b> run · <b>E</b> talk · <b>Esc</b> free mouse · <b>V</b> top-down</div>
+    <div data-for="topdown"><b>Click</b> floor to walk · <b>Click</b> agent to talk · <b>Scroll</b> zoom · <b>Q/E</b> rotate · <b>V</b> first person</div>
+    <div data-for="firstperson"><b>WASD</b> move · <b>Shift</b> run · <b>E</b> talk · <b>Esc</b> free mouse · <b>V</b> top-down</div>
   </div>
   <div id="crosshair"></div>
   <div id="hint" hidden></div>
@@ -44,113 +50,151 @@
       <div class="avatar"></div>
       <div class="who"><div class="name"></div><div class="role"></div></div>
       <span class="status"></span>
-      <button class="ghost" id="newChat" title="Start a new conversation">New chat</button>
-      <button class="icon" id="closeChat" title="Close (Esc)" aria-label="Close">✕</button>
+      <button class="icon sm" id="newChat" title="Start a new conversation" aria-label="New chat"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+      <button class="icon sm" id="closeChat" title="Close (Esc)" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
     </div>
     <div class="messages" id="messages"></div>
     <form class="composer" id="composer">
-      <textarea id="input" rows="2" placeholder="Ask Scripty for a story…"></textarea>
-      <div class="row">
-        <span class="tip">Enter to send · Shift+Enter new line</span>
-        <button type="button" id="stopBtn" class="ghost" hidden>Stop</button>
-        <button type="submit" id="sendBtn">Send</button>
-      </div>
+      <textarea id="input" rows="1" placeholder="Ask Scripty for a story…"></textarea>
+      <button type="button" id="stopBtn" class="icon sm stop" hidden title="Stop" aria-label="Stop"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor"/></svg></button>
+      <button type="submit" id="sendBtn" title="Send (Enter)" aria-label="Send"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M5 12h13m0 0l-5.5-5.5M18 12l-5.5 5.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg></button>
     </form>
   </aside>
 
   <div id="review" class="modal" hidden>
-    <div class="sheet wide" role="dialog" aria-labelledby="reviewTitle">
-      <div class="review-head"><h2 id="reviewTitle">Review screen</h2><button class="icon" id="closeReview" aria-label="Close">✕</button></div>
-      <div class="review-body">
+    <div class="sheet review-sheet" role="dialog" aria-labelledby="reviewTitle">
+      <aside class="rv-list">
+        <h2 id="reviewTitle">Review</h2>
         <ul id="reviewList"></ul>
-        <div class="review-main">
-          <div class="player"><video id="reviewVideo" controls playsinline></video><div id="noVideo" class="muted small">No render yet.</div></div>
-          <div class="review-side">
-            <div id="reviewWaiting" class="waiting"><span></span><button class="ghost" id="sendOnBtn">Send on</button></div>
-            <div id="reviewText" class="msg agent"></div>
-            <div id="publishBox" hidden>
-              <div id="publishText" class="msg agent"></div>
-              <div class="field"><button class="ghost" id="uploadBtn">Publish now</button><a id="bufferLink" class="ghost linkbtn" href="https://publish.buffer.com" target="_blank" rel="noreferrer" hidden>Open Buffer</a><a id="studioLink" class="ghost linkbtn" target="_blank" rel="noreferrer" hidden>Open in YouTube Studio</a></div>
-            </div>
-            <div id="reviewUsage"></div>
-            <div class="posted" id="postedBox"><span class="muted small">Posted it yourself?</span><input id="postedAt" type="datetime-local" /><button class="ghost" id="markPosted">I posted it myself</button><button class="ghost" id="unmarkPosted" hidden>Not posted after all</button></div>
-            <textarea id="reviewNotes" rows="3" placeholder="Your notes (needed to request changes)"></textarea>
-            <div class="field"><button id="approveBtn">Approve</button><button class="ghost" id="changesBtn">Request changes</button></div>
-            <p class="muted small" id="reviewMsg"></p>
-          </div>
-        </div>
+      </aside>
+      <div class="rv-player">
+        <div class="player"><video id="reviewVideo" controls playsinline></video><div id="noVideo">No render yet</div></div>
       </div>
+      <section class="rv-main">
+        <header class="rv-head">
+          <div class="rv-titles"><div class="rv-id" id="rvId"></div><h3 id="rvTitle">Pick a Short</h3></div>
+          <span class="pill" id="rvStatus"></span>
+          <button class="icon sm" id="closeReview" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
+        </header>
+        <div id="reviewWaiting" class="next" hidden><span></span><button class="btn ghost sm" id="sendOnBtn">Send on</button></div>
+        <nav class="tabs" id="rvTabs">
+          <button data-tab="review" class="on">Hawk's review</button>
+          <button data-tab="publish">Upload details</button>
+          <button data-tab="tokens">Tokens</button>
+        </nav>
+        <div class="rv-body">
+          <div data-pane="review"><div id="reviewText" class="prose"></div></div>
+          <div data-pane="publish" hidden>
+            <div id="publishBox">
+              <div id="publishText" class="prose"></div>
+              <div class="row"><button class="btn primary sm" id="uploadBtn">Publish now</button><a id="bufferLink" class="btn ghost sm" href="https://publish.buffer.com" target="_blank" rel="noreferrer" hidden>Open Buffer</a><a id="studioLink" class="btn ghost sm" target="_blank" rel="noreferrer" hidden>Open in YouTube Studio</a></div>
+            </div>
+            <p class="empty-note" id="noPublish">Pip writes the title, description and tags after the Short is approved.</p>
+            <div class="posted" id="postedBox"><span class="muted">Posted it yourself?</span><input id="postedAt" type="datetime-local" /><button class="btn ghost sm" id="markPosted">Mark as posted</button><button class="btn ghost sm" id="unmarkPosted" hidden>Not posted after all</button></div>
+          </div>
+          <div data-pane="tokens" hidden><div id="reviewUsage"></div></div>
+        </div>
+        <footer class="rv-foot">
+          <textarea id="reviewNotes" rows="2" placeholder="Notes for Cutter (needed to request changes)"></textarea>
+          <div class="row"><p id="reviewMsg"></p><button class="btn ghost" id="changesBtn">Request changes</button><button class="btn primary" id="approveBtn">Approve</button></div>
+        </footer>
+      </section>
     </div>
   </div>
 
   <div id="teams" class="modal" hidden>
     <div class="sheet" role="dialog" aria-labelledby="teamsTitle">
-      <div class="review-head"><h2 id="teamsTitle">Teams <span class="muted small" id="teamCount"></span></h2><button class="icon" id="closeTeams" aria-label="Close">✕</button></div>
-      <p class="muted small">Each team is a full production line (Scripty → Cutter → Hawk → Pip) working in its own toolkit repo, side by side in the studio. Teams work in parallel; renders and uploads take turns on this PC, and every extra team uses your Claude plan faster.</p>
+      <div class="sheet-head"><h2 id="teamsTitle">Teams <span class="count" id="teamCount"></span></h2><button class="icon sm" id="closeTeams" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div>
+      <p class="muted">Each team is a full production line working in its own toolkit repo, side by side in the studio. Teams work in parallel; renders and uploads take turns, and every extra team uses your Claude plan faster.</p>
       <div id="teamList"></div>
-      <section>
+      <div class="add-team">
         <h3>Add a team</h3>
         <div class="two">
-          <label>Name <input id="newTeamName" placeholder="e.g. Team Two" /></label>
+          <label>Name <input id="newTeamName" placeholder="Team Two" /></label>
           <label>Toolkit repo on GitHub <input id="newTeamRepo" placeholder="owner/repo" /></label>
         </div>
-        <p class="muted small">Use a separate toolkit repo per team (for example a copy of roblox-shorts-toolkit for a second channel), so their Shorts never collide.</p>
-        <div class="field"><button id="addTeamBtn" class="primary">Add team</button></div>
-        <p class="muted small" id="teamMsg"></p>
-      </section>
+        <div class="row"><button id="addTeamBtn" class="btn primary">Add team</button><p class="muted small" id="teamMsg">Use a separate repo per team so their Shorts never collide.</p></div>
+      </div>
     </div>
   </div>
 
   <div id="settings" class="modal" hidden>
-    <div class="sheet" role="dialog" aria-labelledby="settingsTitle">
-      <h2 id="settingsTitle">Settings <span class="muted small" id="appVersion"></span></h2>
+    <div class="sheet settings-sheet" role="dialog" aria-labelledby="settingsTitle">
+      <nav class="set-nav" id="setNav">
+        <h2 id="settingsTitle">Settings</h2>
+        <div class="set-links"></div>
+        <span class="muted small ver" id="appVersion"></span>
+      </nav>
+      <div class="set-body">
+        <button class="icon sm set-close" id="closeSettings" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button>
 
-      <section>
+      <section data-title="Account">
         <h3>Claude account</h3>
-        <p class="muted" id="acctDetail">Checking…</p>
-        <p class="muted small">Agents use the Claude account you signed in to with Claude Code on this PC — your Pro plan. To sign in or switch accounts, press <b>Sign in / switch</b>, type <code>/login</code> in the terminal that opens, then press <b>Check again</b>.</p>
-        <div class="field"><button class="ghost" id="loginBtn">Sign in / switch…</button><button class="ghost" id="recheck">Check again</button></div>
-        <p class="muted small" id="loginMsg"></p>
+        <p class="lead" id="acctDetail">Checking…</p>
+        <p class="muted">Agents use the Claude account signed in to Claude Code on this PC. To sign in or switch, press <b>Sign in / switch</b>, type <code>/login</code> in the terminal that opens, then <b>Check again</b>.</p>
+        <div class="row"><button class="btn ghost" id="loginBtn">Sign in / switch</button><button class="btn ghost" id="recheck">Check again</button></div>
+        <p class="msg" id="loginMsg"></p>
       </section>
 
-      <section>
-        <h3>Toolkit <span class="muted small" id="toolkitTeam"></span></h3>
-        <p class="muted small">The app clones your toolkit from GitHub and pulls the latest version every time it starts. Agents save their work into this clone.</p>
-        <label class="small muted" for="toolkitRepo">GitHub repo</label>
-        <div class="field"><input id="toolkitRepo" placeholder="owner/repo" /><button class="ghost" id="cloneToolkit">Clone / update</button></div>
-        <label class="small muted" for="toolkitPath">Local folder</label>
-        <div class="field"><input id="toolkitPath" readonly /><button class="ghost" id="pickToolkit">Use another folder…</button></div>
-        <p class="muted small" id="toolkitMsg"></p>
+      <section data-title="Toolkit">
+        <h3>Toolkit <span class="state" id="toolkitTeam"></span></h3>
+        <p class="muted">Cloned from GitHub and updated every time the app starts. Agents save their work into it.</p>
+        <label>GitHub repo</label>
+        <div class="field"><input id="toolkitRepo" placeholder="owner/repo" /><button class="btn ghost" id="cloneToolkit">Clone / update</button></div>
+        <label>Local folder</label>
+        <div class="field"><input id="toolkitPath" readonly /><button class="btn ghost" id="pickToolkit">Change…</button></div>
+        <p class="msg" id="toolkitMsg"></p>
       </section>
 
-      <section>
-        <h3>Gemini API key <span class="muted small">(voiceovers)</span></h3>
-        <div class="field"><input id="geminiKey" type="password" autocomplete="off" placeholder="Paste key from Google AI Studio" /><button class="ghost" id="saveGemini">Save</button><button class="ghost" id="testGemini">Test key</button></div>
-        <p class="muted small" id="geminiMsg"></p>
+      <section data-title="Voiceover">
+        <h3>Gemini API key</h3>
+        <p class="muted">Scripty uses it for voiceovers. Stored encrypted on this PC.</p>
+        <div class="field"><input id="geminiKey" type="password" autocomplete="off" placeholder="Paste key from Google AI Studio" /><button class="btn ghost" id="saveGemini">Save</button><button class="btn ghost" id="testGemini">Test</button></div>
+        <p class="msg" id="geminiMsg"></p>
       </section>
 
-      <section>
+      <section data-title="Autopilot">
         <h3>Autopilot</h3>
-        <p class="muted small">On: agents never ask questions or wait for approval. They pick the story, approve their own work, write every decision into the Short's notes, and push to GitHub. Anything outside their safe list is skipped instead of asked.</p>
-        <div class="two">
-          <label><span><input type="checkbox" id="autopilotBox" /> Autopilot on</span></label>
-          <label>Make a Short every day at
-            <input id="dailyTime" type="time" />
-          </label>
+        <p class="muted">Agents never ask questions or wait for approval. They decide, write every decision into the Short's notes and push to GitHub. Anything outside their safe list is skipped.</p>
+        <label class="check"><input type="checkbox" id="autopilotBox" /> Autopilot on</label>
+        <label>Make a Short every day at</label>
+        <div class="field narrow"><input id="dailyTime" type="time" /></div>
+        <p class="muted small">Runs while the app is open, or as soon as you open it later that day. Clear the time to turn it off.</p>
+      </section>
+
+      <section data-title="Agents">
+        <h3>Agents</h3>
+        <p class="muted">Model and thinking effort per desk. Lower effort uses fewer tokens.</p>
+        <div class="agent-grid">
+          <span class="gh">Desk</span><span class="gh">Model</span><span class="gh">Effort</span>
+          <span class="desk"><i style="background:#FFC94A"></i>Scripty</span>
+          <select id="model"><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option></select>
+          <select data-effort="script-writer"></select>
+          <span class="desk"><i style="background:#2F6BB8"></i>Cutter</span>
+          <select id="editorModel"><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option></select>
+          <select data-effort="editor"></select>
+          <span class="desk"><i style="background:#FF6B2C"></i>Hawk</span>
+          <select id="reviewerModel"><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option></select>
+          <select data-effort="reviewer"></select>
+          <span class="desk"><i style="background:#A06CD5"></i>Pip</span>
+          <select id="publisherModel"><option value="opus">Opus</option><option value="sonnet">Sonnet</option><option value="haiku">Haiku</option></select>
+          <select data-effort="publisher"></select>
         </div>
-        <p class="muted small">The daily run starts at that time while the app is open, or as soon as you open it later that day. Clear the time to turn daily runs off.</p>
+        <div id="effortBox" hidden></div>
       </section>
 
-      <section>
-        <h3>Rendering <span class="muted small" id="renderState"></span></h3>
-        <p class="muted small">Cutter renders on this PC's graphics card with your toolkit's render worker. Set it up once (10-20 minutes: Blender for Python, the browser renderer, Remotion, speech-to-text, base 3D assets).</p>
-        <div class="field"><button class="ghost" id="setupRender">Set up rendering</button><button class="ghost" id="openOutput">Open video folder</button><button class="ghost" id="openLog">Open full log</button></div>
-        <p class="muted small" id="setupMsg"></p>
+      <section data-title="Rendering">
+        <h3>Rendering <span class="state" id="renderState"></span></h3>
+        <p class="muted">Cutter renders on this PC's graphics card with your toolkit's render worker. Set it up once (10–20 minutes).</p>
+        <div class="row"><button class="btn ghost" id="setupRender">Set up rendering</button><button class="btn ghost" id="openOutput">Open video folder</button><button class="btn ghost" id="openLog">Open log</button></div>
+        <p class="msg" id="setupMsg"></p>
         <pre id="setupLog" hidden></pre>
+        <label>Python command</label>
+        <div class="field narrow"><input id="python" placeholder="python" /></div>
       </section>
 
-      <section>
-        <h3>Publishing <span class="muted small" id="pubState"></span></h3>
+      <section data-title="Publishing">
+        <h3>Publishing <span class="state" id="pubState"></span></h3>
         <div class="two">
           <label>Publish via (switch any time)
             <select id="publishVia">
@@ -162,28 +206,28 @@
         </div>
         <div id="pubYouTube">
           <p class="muted small">Uploads from this PC as private with a go-live time; YouTube makes it public then, even if your PC is off. Free. One-time setup: in Google Cloud Console enable "YouTube Data API v3", create an OAuth client of type <b>Desktop app</b>, download its JSON (AUTOMATION.md step 4). After the first go-live time the app checks the video really went public.</p>
-          <div class="field"><button class="ghost" id="ytSecret">1. Choose client_secret.json…</button><button class="ghost" id="ytSignIn">2. Sign in to YouTube</button></div>
+          <div class="field"><button class="btn ghost" id="ytSecret">1. Choose client_secret.json…</button><button class="btn ghost" id="ytSignIn">2. Sign in to YouTube</button></div>
           <pre id="ytLog" hidden></pre>
         </div>
         <div id="pubManual" hidden><p class="muted small">Pip still writes the title, description and tags for every approved Short (see the review screen). Post it however you like, then press <b>I posted it myself</b> on the review screen so the daily schedule keeps that day.</p></div>
         <div id="pubBuffer" hidden>
         <p class="muted small">The app puts the video online and schedules it as a YouTube Short in your Buffer account. Connect your YouTube channel inside Buffer first.</p>
         <label class="small muted" for="bufferKey">1. Buffer API key (Buffer → Settings → API, or publish.buffer.com/settings/api)</label>
-        <div class="field"><input id="bufferKey" type="password" autocomplete="off" placeholder="Paste your Buffer API key" /><button class="ghost" id="saveBufferKey">Save</button></div>
+        <div class="field"><input id="bufferKey" type="password" autocomplete="off" placeholder="Paste your Buffer API key" /><button class="btn ghost" id="saveBufferKey">Save</button></div>
         <label class="small muted" for="bufferChannel">2. YouTube channel in Buffer</label>
-        <div class="field"><select id="bufferChannel"><option value="">—</option></select><button class="ghost" id="refreshChannels">Refresh</button></div>
+        <div class="field"><select id="bufferChannel"><option value="">—</option></select><button class="btn ghost" id="refreshChannels">Refresh</button></div>
         <label class="small muted" for="mediaHost">3. Video host (Buffer fetches each video from a public link)</label>
         <div class="field"><select id="mediaHost"><option value="cloudinary">Cloudinary (free tier, easiest)</option><option value="r2">Cloudflare R2 (public bucket)</option></select></div>
         <div id="hostCloudinary" class="two">
           <label>Cloud name <input id="cloudinaryCloud" /></label>
           <label>API key <input id="cloudinaryKey" /></label>
-          <label>API secret <span class="field"><input id="cloudinarySecret" type="password" autocomplete="off" placeholder="saved secrets stay hidden" /><button class="ghost" data-secret="cloudinarySecret">Save</button></span></label>
+          <label>API secret <span class="field"><input id="cloudinarySecret" type="password" autocomplete="off" placeholder="saved secrets stay hidden" /><button class="btn ghost" data-secret="cloudinarySecret">Save</button></span></label>
         </div>
         <div id="hostR2" class="two" hidden>
           <label>Account ID <input id="r2Account" /></label>
           <label>Bucket <input id="r2Bucket" /></label>
           <label>Access key ID <input id="r2KeyId" /></label>
-          <label>Secret access key <span class="field"><input id="r2Secret" type="password" autocomplete="off" placeholder="saved secrets stay hidden" /><button class="ghost" data-secret="r2Secret">Save</button></span></label>
+          <label>Secret access key <span class="field"><input id="r2Secret" type="password" autocomplete="off" placeholder="saved secrets stay hidden" /><button class="btn ghost" data-secret="r2Secret">Save</button></span></label>
           <label>Public bucket URL <input id="r2PublicBase" placeholder="https://pub-xxxx.r2.dev" /></label>
         </div>
         </div>
@@ -216,62 +260,18 @@
         </div>
         <p class="muted small">Posting time per day, in the audience's time zone. Defaults come from Buffer's and SocialPilot's 2026 studies (Shorts do best late afternoon/evening; Friday is strongest). Check YouTube Studio → Analytics → Audience → "When your viewers are on YouTube" after a few weeks and adjust.</p>
         <div class="times" id="ytTimes"></div>
-        <div class="field"><button class="ghost" id="ytResetTimes">Reset to researched times</button><span class="muted small" id="ytNext"></span></div>
+        <div class="field"><button class="btn ghost" id="ytResetTimes">Reset to researched times</button><span class="muted small" id="ytNext"></span></div>
         <label class="small"><input type="checkbox" id="ytAuto" /> Publish automatically after Hawk approves (otherwise press "Publish now" on the review screen)</label>
         </div>
         <p class="muted small" id="pubMsg"></p>
       </section>
 
-      <section class="two">
-        <label>Editor model
-          <select id="editorModel">
-            <option value="sonnet">Sonnet (balanced)</option>
-            <option value="opus">Opus (best results)</option>
-            <option value="haiku">Haiku (lightest)</option>
-          </select>
-        </label>
-        <label>Publisher model
-          <select id="publisherModel">
-            <option value="sonnet">Sonnet (balanced)</option>
-            <option value="haiku">Haiku (lightest)</option>
-            <option value="opus">Opus (best writing)</option>
-          </select>
-        </label>
-        <label>Reviewer model
-          <select id="reviewerModel">
-            <option value="sonnet">Sonnet (balanced)</option>
-            <option value="opus">Opus (best results)</option>
-            <option value="haiku">Haiku (lightest)</option>
-          </select>
-        </label>
-      </section>
-
-      <section class="two">
-        <label>Script Writer model
-          <select id="model">
-            <option value="sonnet">Sonnet (balanced)</option>
-            <option value="opus">Opus (best writing)</option>
-            <option value="haiku">Haiku (lightest)</option>
-          </select>
-        </label>
-        <label>Python command
-          <input id="python" placeholder="python" />
-        </label>
-      </section>
-
-      <section>
-        <h3>Thinking effort <span class="muted small">(token use)</span></h3>
-        <p class="muted small">Keep Opus everywhere and turn effort down where the job is simple. Lower effort = fewer thinking tokens per step.</p>
-        <div class="two" id="effortBox"></div>
-      </section>
-
-      <section>
+      <section data-title="Updates">
         <h3>App updates</h3>
-        <p class="muted small" id="updateMsg">The app checks GitHub for a new version when it starts and every few hours.</p>
-        <div class="field"><button class="ghost" id="checkUpdate">Check for updates</button><button class="ghost" id="applyUpdate" hidden>Update and restart</button></div>
+        <p class="muted" id="updateMsg">The app checks GitHub for a new version when it starts and every few hours.</p>
+        <div class="row"><button class="btn ghost" id="checkUpdate">Check for updates</button><button class="btn primary" id="applyUpdate" hidden>Update and restart</button></div>
       </section>
-
-      <div class="actions"><button id="closeSettings">Done</button></div>
+      </div>
     </div>
   </div>
 
