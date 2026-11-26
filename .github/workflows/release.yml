@@ -29,6 +29,15 @@ jobs:
           if ! git ls-remote --exit-code --tags origin "refs/tags/$v" >/dev/null; then
             git tag "$v" && git push origin "$v"
           fi
+      - name: Create the GitHub release first
+        # electron-builder uploads the installer, blockmap and latest.yml in parallel; if the release doesn't exist
+        # yet, each upload can create its own copy (that happened with v0.7.0 and broke "Check for updates").
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver="$(node -p "require('./package.json').version")"
+          gh release view "v$ver" >/dev/null 2>&1 || gh release create "v$ver" --title "$ver" --notes "Oopsmith Studio $ver" --verify-tag
       - run: npm ci
       - run: npm run typecheck
       - run: node scripts/build.mjs
