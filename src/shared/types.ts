@@ -110,6 +110,9 @@ export interface ShortRow {
 
 export interface ReviewInfo {
   id: string;
+  /** what the Short is waiting for right now */
+  waiting: string;
+  status: string;
   review: string | null;
   videoUrl: string | null;
   usage: ShortUsage | null;
@@ -120,6 +123,8 @@ export interface StudioApi {
   getUsage(): Promise<Record<string, ShortUsage>>;
   getReview(id: string): Promise<ReviewInfo>;
   decideReview(id: string, approve: boolean, notes: string): Promise<{ ok: boolean; message: string }>;
+  sendOn(id: string): Promise<string>;
+  onPipelineBlocked(cb: (message: string) => void): () => void;
   appVersion(): Promise<string>;
   runDaily(): Promise<void>;
   getHistory(agent: AgentId): Promise<ChatItem[]>;

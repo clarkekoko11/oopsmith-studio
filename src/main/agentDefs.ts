@@ -32,8 +32,8 @@ export const reviewerKickoff = (id: string, video: string, version: number) =>
   `${AUTOPILOT_TAG} Review ${id} v${version}. The rendered video is: ${video}\nApprove it or request changes, without asking me anything.`;
 
 /** Hawk asked for changes: back to Cutter. */
-export const editorRevisionKickoff = (id: string) =>
-  `${AUTOPILOT_TAG} Hawk reviewed ${id} and asked for changes. Read shorts/${id}/review.md, fix exactly those points (only the shots involved), redo the still check for those shots, mark it ready again and push. Don't ask me anything.`;
+export const editorRevisionKickoff = (id: string, byUser = false) =>
+  `${AUTOPILOT_TAG} ${byUser ? 'The user (from the review screen)' : 'Hawk'} asked for changes on ${id}. Read shorts/${id}/review.md${byUser ? ' — the "From you" section at the end is the request' : ''}, fix exactly those points (only the shots involved), redo the still check for those shots, mark it ready again and push. Don't ask me anything.`;
 
 /** A render failed: send it back to Cutter with the error. */
 export const editorFixKickoff = (id: string, error: string) =>

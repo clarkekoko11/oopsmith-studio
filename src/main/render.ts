@@ -180,3 +180,17 @@ export async function shortsCmd(python: string, toolkit: string, args: string[])
   const r = await capture(python, toolkit, ['tools/shorts.py', ...args]);
   return { ok: r.code === 0, out: r.out };
 }
+
+/**
+ * Is this PC already able to build and render (e.g. set up earlier by the render worker)?
+ * Returns the Python command that has Blender-for-Python + Playwright, or null.
+ */
+export async function detectRenderReady(python: string, toolkit: string): Promise<string | null> {
+  if (!existsSync(join(toolkit, 'node_modules'))) return null;
+  const candidates = [python, ...(process.platform === 'win32' ? ['py -3.13', 'py -3.11'] : ['python3.13', 'python3.11'])].filter((c, i, a) => a.indexOf(c) === i);
+  for (const py of candidates) {
+    const r = await capture(py, toolkit, ['-c', 'import bpy, playwright, scipy; print("ok")']);
+    if (r.code === 0 && /\bok\b/.test(r.out)) return py;
+  }
+  return null;
+}

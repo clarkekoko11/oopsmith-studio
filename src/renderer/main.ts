@@ -280,6 +280,7 @@ async function updateBanner(a: AccountState | null = lastAccount, busyMsg: strin
   if (a?.checked && !a.signedIn) msgs.push('Sign in to Claude Code on this PC so the agents can work.');
   if (a?.apiKeyInEnv) msgs.push('An ANTHROPIC_API_KEY is set on this PC. The app ignores it and uses your Claude plan login.');
   if (busyMsg) msgs.unshift(busyMsg);
+  if (blockedMsg) msgs.push(blockedMsg);
   if (toolkitProblem) msgs.push(toolkitProblem);
   else if (!toolkitBusy && !s.hasGeminiKey) msgs.push('Add your Gemini API key so Scripty can make voiceovers.');
   else if (!toolkitBusy && !s.renderReady) msgs.push('Set up rendering once so Cutter can build and render (Settings → Rendering).');
@@ -481,6 +482,10 @@ async function showReview(id: string) {
     v.src = info.videoUrl;
     v.dataset.src = info.videoUrl;
   }
+  const w = $('#reviewWaiting');
+  w.hidden = !info.waiting;
+  w.querySelector('span')!.textContent = `${info.status ? info.status + ' · ' : ''}${info.waiting}`;
+  ($('#sendOnBtn') as HTMLButtonElement).hidden = !/Waiting|Next in line|Rendered before/.test(info.waiting);
   $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review) : '<p>Hawk hasn\'t reviewed this one yet.</p>';
   $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted small">No token data yet (counted from Phase 3 on).</p>';
   $('#reviewMsg').textContent = '';
@@ -512,6 +517,16 @@ async function decide(approve: boolean) {
   await loadBoard();
   await showReview(reviewing);
 }
+$('#sendOnBtn').addEventListener('click', async () => {
+  if (!reviewing) return;
+  $('#reviewMsg').textContent = await api.sendOn(reviewing);
+  await showReview(reviewing);
+});
+let blockedMsg: string | null = null;
+api.onPipelineBlocked((m) => {
+  blockedMsg = m || null;
+  void updateBanner();
+});
 $('#approveBtn').addEventListener('click', () => void decide(true));
 $('#changesBtn').addEventListener('click', () => void decide(false));
 

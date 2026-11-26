@@ -370,6 +370,12 @@ export class AgentManager {
     return [{ kind: 'notice', id: 'offline', at: 0, text: `${m.name} the ${m.role} starts work in Phase ${m.phase}. Talk to Scripty at the Script Writer desk for now.` }];
   }
   send(id: AgentId, text: string, display?: string, opts?: { fresh?: boolean; short?: string }) { return this.sessions.get(id)?.send(text, display, opts); }
+  /** The Short a desk is busy with, if any. */
+  currentWork(id: AgentId): string | undefined {
+    const s = this.sessions.get(id);
+    if (!s || s.status === 'idle' || s.status === 'error') return s?.external ? s.currentShort : undefined;
+    return s.currentShort;
+  }
   isIdle(id: AgentId) { const s = this.sessions.get(id); return !!s && !s.external && (s.status === 'idle' || s.status === 'error'); }
   onTurnEnd(cb: TurnEnd) { for (const s of this.sessions.values()) s.onTurnEnd = cb; }
   onUsage(cb: (short: string | undefined) => void) { for (const s of this.sessions.values()) s.onUsage = cb; }

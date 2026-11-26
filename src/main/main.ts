@@ -11,7 +11,7 @@ import { DAILY_KICKOFF } from './agentDefs';
 import { Pipeline } from './pipeline';
 import { applyUpdate, checkForUpdate } from './updater';
 import { allUsage, totalTokens } from './usage';
-import { outputDir, setupRendering, shortsCmd, stopJob } from './render';
+import { detectRenderReady, outputDir, setupRendering, shortsCmd, stopJob } from './render';
 import { basename } from 'node:path';
 import { cloneToolkit, commitAndPush, pullToolkit } from './git';
 import { claudeExecutable } from './sdk';
@@ -34,6 +34,22 @@ const agents = new AgentManager(
 );
 const pipeline = new Pipeline(agents);
 pipeline.onChange = () => send('board:changed', null);
+pipeline.onBlocked = (message) => {
+  send('pipeline:blocked', message);
+  agents.post('editor', { kind: 'notice', tone: 'warn', text: message });
+  void autoDetectRendering();
+};
+/** If the render worker was already set up on this PC, mark rendering ready without re-running setup. */
+async function autoDetectRendering() {
+  const s = loadSettings();
+  if (s.renderReady || !s.toolkitPath || !existsSync(s.toolkitPath)) return;
+  const py = await detectRenderReady(s.pythonCommand, s.toolkitPath);
+  if (!py) return;
+  saveSettings({ renderReady: true, pythonCommand: py });
+  send('pipeline:blocked', '');
+  agents.post('editor', { kind: 'notice', text: `Rendering was already set up on this PC (found with "${py}"), so I can build and render now.` });
+  void pipeline.tick();
+}
 agents.onUsage(() => send('board:changed', null));
 agents.onTurnEnd(() => {
   send('board:changed', null);
@@ -107,7 +123,7 @@ app.whenReady().then(() => {
     let review: string | null = null;
     try { review = readFileSync(join(s.toolkitPath, 'shorts', id, 'review.md'), 'utf8'); } catch { /* none yet */ }
     const video = row?.file && existsSync(join(outputDir(s.toolkitPath), row.file)) ? `toolkit://video/${encodeURIComponent(row.file)}` : null;
-    return { id, review, videoUrl: video, usage: allUsage()[id] ?? null };
+    return { id, status: row?.status ?? '', waiting: pipeline.explain(id), review, videoUrl: video, usage: allUsage()[id] ?? null };
   });
   // your own decision from the review screen overrides Hawk's
   ipcMain.handle('review:decide', async (_e, id: string, approve: boolean, notes: string) => {
@@ -123,11 +139,20 @@ app.whenReady().then(() => {
       appendFileSync(file, `\n\n## From you (${stamp}) — CHANGES\n${note}\n`);
       await shortsCmd(s.pythonCommand, s.toolkitPath, ['revise', id, `You: ${note.split('\n')[0].slice(0, 120)}`]);
       await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=changes_requested']);
+      pipeline.follow(id); // your request moves on even with Autopilot off
     }
     const g = await commitAndPush(s.toolkitPath, [`shorts/${id}`, 'shorts/registry.json', 'SHORTS.md'], `${id}: ${approve ? 'approved' : 'changes requested'} by you`);
     send('board:changed', null);
-    void pipeline.tick();
-    return { ok: true, message: `${approve ? 'Approved' : 'Sent back to Cutter'}. ${g.message}` };
+    await pipeline.tick();
+    const next = approve ? '' : ` ${pipeline.explain(id)}`;
+    return { ok: true, message: `${approve ? 'Approved' : 'Changes requested'}. ${g.message}${next}` };
+  });
+  ipcMain.handle('review:send-on', async (_e, id: string) => {
+    pipeline.follow(id);
+    await autoDetectRendering();
+    await pipeline.tick();
+    send('board:changed', null);
+    return pipeline.explain(id);
   });
   ipcMain.handle('app:version', () => app.getVersion());
   const checkUpdates = async () => {
@@ -233,6 +258,7 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  setTimeout(() => void autoDetectRendering(), 5000);
   if (process.env.OOPSMITH_SMOKE) {
     win!.webContents.on('console-message', (e) => console.log('[renderer]', (e as unknown as { message: string }).message));
     // test mode: save a screenshot of the window and quit

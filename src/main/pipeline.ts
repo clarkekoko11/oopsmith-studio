@@ -15,6 +15,7 @@ export class Pipeline {
   private warnedSetup = false;
   private ticking = false;
   onChange: () => void = () => {};
+  onBlocked: (message: string) => void = () => {};
 
   constructor(private agents: AgentManager) {}
 
@@ -44,12 +45,55 @@ export class Pipeline {
     }
   }
 
+  /** Shorts you asked for by hand (review screen): they move on even with Autopilot off. */
+  private manual = new Set<string>();
+  /** Why the pipeline is holding back, per Short, for the review screen. */
+  private why = new Map<string, string>();
+
+  follow(id: string) {
+    this.manual.add(id);
+    // a new request from you is a new attempt
+    for (const k of [...this.tries.keys()]) if (k.includes(id)) this.tries.delete(k);
+  }
+
+  /** One line: what this Short is waiting for right now. */
+  explain(id: string): string {
+    const reg = this.registry();
+    const m = reg?.shorts[id];
+    if (!m) return '';
+    const s = loadSettings();
+    const st = m.status ?? '';
+    const busy = (a: AgentId) => this.agents.currentWork(a);
+    if (this.why.has(id)) return this.why.get(id)!;
+    if (/approved|published|uploaded/.test(st)) return 'Done.';
+    if (st === 'rendering' || (renderBusy() && busy('editor')?.includes(id))) return 'Rendering on your graphics card…';
+    if (busy('editor') === id) return 'Cutter is working on it now.';
+    if (busy('reviewer') === id) return 'Hawk is reviewing it now.';
+    const auto = s.autopilot || this.manual.has(id);
+    if (!auto && /voiced|building|ready_to_render|render_failed|changes_requested|in_review|reviewing/.test(st)) {
+      return 'Waiting: Autopilot is off. Turn it on, or press "Send on" here.';
+    }
+    if (/voiced|building|ready_to_render|render_failed|changes_requested/.test(st)) {
+      if (!s.renderReady) return "Waiting: rendering isn't set up in the app yet (Settings → Rendering → Set up rendering).";
+      if (!this.agents.isIdle('editor')) return `Waiting for Cutter (busy with ${busy('editor') ?? 'another job'}).`;
+      return 'Next in line for Cutter.';
+    }
+    if (/in_review|reviewing/.test(st)) {
+      if (!m.file) return 'Waiting: no rendered video recorded for this version yet.';
+      return this.agents.isIdle('reviewer') ? 'Next in line for Hawk.' : `Waiting for Hawk (busy with ${busy('reviewer') ?? 'another review'}).`;
+    }
+    if (st === 'delivered') return 'Rendered before review existed. Approve it, or request changes to send it to Cutter.';
+    return '';
+  }
+
   private async step() {
     const s = loadSettings();
-    if (!s.autopilot) return;
     const reg = this.registry();
     if (!reg) return;
-    const by = (st: string) => Object.values(reg.shorts).filter((m) => m.status === st).map((m) => m.id).sort();
+    this.why.clear();
+    const allowed = (id: string) => s.autopilot || this.manual.has(id);
+    const by = (st: string) => Object.values(reg.shorts).filter((m) => m.status === st && allowed(m.id)).map((m) => m.id).sort();
+    for (const id of [...this.manual]) if (/approved|published|uploaded/.test(reg.shorts[id]?.status ?? '')) this.manual.delete(id);
 
     // Hawk works independently of Cutter: review what's rendered (or a review that stopped part-way)
     const reviewer: AgentId = 'reviewer';
@@ -70,24 +114,25 @@ export class Pipeline {
     if (waiting.length && !s.renderReady) {
       if (!this.warnedSetup) {
         this.warnedSetup = true;
-        this.agents.post(editor, { kind: 'notice', tone: 'warn', text: `${waiting[0]} is waiting for me, but rendering isn't set up on this PC yet. Open Settings → Rendering → Set up rendering (one time, 10-20 min).` });
+        this.onBlocked(`${waiting[0]} is waiting for Cutter, but rendering isn't set up in the app yet. Settings → Rendering → Set up rendering (quick if your render worker is already set up).`);
       }
       return;
     }
 
     // 1. finish what's ready: render it
     const ready = by('ready_to_render')[0];
-    if (ready && this.attempt('render', ready, 3)) return void this.render(ready);
+    if (ready && this.attempt('render', `${ready}v${reg.shorts[ready].version ?? 1}`, 3)) return void this.render(ready);
     // 2. a failed render goes back to the Editor with the error
-    const failed = by('render_failed').find((id) => this.attempt('fix', id, 2));
+    const failed = by('render_failed').find((id) => this.attempt('fix', `${id}v${reg.shorts[id].version ?? 1}`, 2));
     if (failed) {
       await this.agents.send(editor, editorFixKickoff(failed, reg.shorts[failed].error ?? 'unknown error'), `Render of ${failed} failed — fix it`, { fresh: true, short: failed });
       return;
     }
-    // 3. Hawk asked for changes: a revision (each version gets one try)
+    // 3. changes requested (by Hawk or by you): a revision (each version gets one try)
     const changes = by('changes_requested').find((id) => this.attempt('revise', `${id}v${reg.shorts[id].version ?? 1}`, 1));
     if (changes) {
-      await this.agents.send(editor, editorRevisionKickoff(changes), `Hawk asked for changes on ${changes}`, { fresh: true, short: changes });
+      const who = this.manual.has(changes) ? 'You' : 'Hawk';
+      await this.agents.send(editor, editorRevisionKickoff(changes, who === 'You'), `${who} asked for changes on ${changes}`, { fresh: true, short: changes });
       return;
     }
     // 4. a build that stopped part-way: continue it once
