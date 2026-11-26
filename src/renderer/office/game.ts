@@ -37,6 +37,8 @@ export class Office {
   onTalk: (a: AgentId) => void = () => {};
   onMode: (m: CameraMode) => void = () => {};
   onHint: (text: string | null) => void = () => {};
+  onScreen: () => void = () => {};
+  private videoEl?: HTMLVideoElement;
 
   private player: Character;
   private pos = new THREE.Vector3(0, 0, 11.5);
@@ -141,6 +143,34 @@ export class Office {
   setBoard(rows: Parameters<ReturnType<typeof buildOffice>['drawBoard']>[0]) {
     this.office.drawBoard(rows);
   }
+  /** Play the latest rendered Short (muted, looping) on the review screen; null shows the poster. */
+  setReviewVideo(url: string | null) {
+    const mat = this.office.tv.material as THREE.MeshBasicMaterial;
+    if (this.videoEl?.dataset.src === (url ?? '')) return;
+    this.videoEl?.pause();
+    if (!url) {
+      this.office.tv.scale.set(1, 1, 1);
+      mat.map = this.office.reviewPoster;
+      mat.needsUpdate = true;
+      this.videoEl = undefined;
+      return;
+    }
+    const v = document.createElement('video');
+    v.src = url;
+    v.dataset.src = url;
+    v.muted = true;
+    v.loop = true;
+    v.playsInline = true;
+    void v.play().catch(() => {});
+    const tex = new THREE.VideoTexture(v);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    mat.map = tex;
+    mat.needsUpdate = true;
+    this.videoEl = v;
+    // the screen is 7 x 3.94 (16:9); the Short is 9:16, so show it as a tall picture in the middle
+    this.office.tv.scale.set((3.94 * 9) / 16 / 7, 1, 1);
+  }
+
   setMode(m: CameraMode) {
     if (m === this.mode) return;
     this.mode = m;
@@ -229,7 +259,7 @@ export class Office {
         }
       } else {
         const hit = this.pick(e.clientX, e.clientY);
-        el.style.cursor = hit.agent ? 'pointer' : 'default';
+        el.style.cursor = hit.agent || hit.screen ? 'pointer' : 'default';
       }
     });
     window.addEventListener('pointerup', (e) => {
@@ -238,7 +268,8 @@ export class Office {
       if (!d || d.moved || d.button !== 0 || this.mode !== 'topdown' || !this.inputEnabled) return;
       if (e.target !== el) return;
       const hit = this.pick(e.clientX, e.clientY);
-      if (hit.agent) this.walkToAgent(hit.agent);
+      if (hit.screen) this.onScreen();
+      else if (hit.agent) this.walkToAgent(hit.agent);
       else if (hit.point) {
         const p = this.nav.path(this.pos.x, this.pos.z, hit.point.x, hit.point.z);
         if (p) {
@@ -251,7 +282,7 @@ export class Office {
     });
   }
 
-  private pick(cx: number, cy: number): { agent?: AgentId; point?: THREE.Vector3 } {
+  private pick(cx: number, cy: number): { agent?: AgentId; point?: THREE.Vector3; screen?: boolean } {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
@@ -260,6 +291,7 @@ export class Office {
       if (!h.object.visible) continue;
       const agent = h.object.userData.agent as AgentId | undefined;
       if (agent) return { agent };
+      if (h.object.userData.screen) return { screen: true };
       if (this.office.pickFloor.includes(h.object)) return { point: h.point };
     }
     // nothing pickable in front: project onto the floor plane

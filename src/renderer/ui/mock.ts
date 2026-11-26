@@ -4,11 +4,11 @@ import type { AgentEvent, AgentId, AgentInfo, ChatItem, Settings, StudioApi } fr
 export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
   const hist: Record<string, ChatItem[]> = { 'script-writer': [] };
-  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: '', editorModel: '', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false };
+  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: 'sonnet', editorModel: 'sonnet', reviewerModel: 'sonnet', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false };
   const agents: AgentInfo[] = [
     { id: 'script-writer', name: 'Scripty', role: 'Script Writer', phase: 1, status: 'idle' },
     { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'working', activity: 'RS-0003 · rendering frames 42%' },
-    { id: 'reviewer', name: 'Hawk', role: 'Reviewer', phase: 3, status: 'offline', activity: 'arrives in Phase 3' },
+    { id: 'reviewer', name: 'Hawk', role: 'Reviewer', phase: 3, status: 'working', activity: 'RS-0003 · checking captions' },
     { id: 'publisher', name: 'Pip', role: 'Publisher', phase: 4, status: 'offline', activity: 'arrives in Phase 4' },
   ];
   const emit = (e: AgentEvent) => listeners.forEach((l) => l(e));
@@ -21,6 +21,9 @@ export function mockApi(): StudioApi {
   };
   return {
     getAgents: async () => agents,
+    getReview: async (id) => ({ id, review: `# ${id} v1 review — APPROVED\n\n## Checks\n- Technical: 1080x1920, 30 fps, audio, 58.2 s\n- Picture: clean, no clipping\n- Captions: in sync\n- Sound: max -1.2 dB\n\n## Notes\n- Shot at 41 s is a bit dark.`, videoUrl: null, usage: null }),
+    decideReview: async () => ({ ok: true, message: 'Approved (preview).' }),
+    getUsage: async () => ({ 'RS-0003': { total: { input: 41000, output: 52000, cacheRead: 1830000, cacheWrite: 210000, steps: 141, jobs: 3 }, byAgent: { 'script-writer': { input: 9000, output: 8000, cacheRead: 310000, cacheWrite: 40000, steps: 24, jobs: 1 }, editor: { input: 30000, output: 41000, cacheRead: 1400000, cacheWrite: 150000, steps: 104, jobs: 1 }, reviewer: { input: 2000, output: 3000, cacheRead: 120000, cacheWrite: 20000, steps: 13, jobs: 1 } } } }),
     appVersion: async () => 'preview',
     runDaily: async () => {},
     getHistory: async (a) => (a === 'script-writer' ? hist[a] : [{ kind: 'notice', id: 'x', at: 0, text: 'Starts work in a later phase.' }]),
@@ -61,7 +64,7 @@ export function mockApi(): StudioApi {
     cloneToolkit: async () => ({ ok: true, message: 'Cloned (preview).' }),
     syncToolkit: async () => ({ ok: true, message: 'Toolkit is up to date.' }),
     onToolkit: () => () => {},
-    listShorts: async () => [{ id: 'RS-0001', title: 'This 10-Foot Lake Swallowed a 15-Story Oil Rig', status: 'delivered', version: 2 }],
+    listShorts: async () => [{ id: 'RS-0003', title: 'The Gimli Glider', status: 'approved', version: 1, tokens: 2133000, file: 'RS-0003_gimli_v1.mp4' }, { id: 'RS-0001', title: 'This 10-Foot Lake Swallowed a 15-Story Oil Rig', status: 'delivered', version: 2 }],
     fileUrl: async () => null,
     setupRendering: async () => ({ ok: true, message: 'Rendering is set up (preview).' }),
     onSetup: () => () => {},

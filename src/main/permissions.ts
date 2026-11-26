@@ -42,7 +42,7 @@ export function splitCommand(cmd: string): string[] {
     cur += c;
   }
   parts.push(cur);
-  return parts.map((p) => p.trim().replace(/(\s+(\d|\*)?>&\d|\s+(\d|\*)?>\s*(\/dev\/null|\$null|nul))+$/i, '').trim()).filter(Boolean);
+  return parts.map((p) => p.trim().replace(/(\s+(\d|\*)?>&\d|\s+(\d|\*)?>>?\s*(\/dev\/null|\$null|nul|(?![a-zA-Z]:)(?!\S*\.\.)[\w.][\w./\\-]*))+$/i, '').trim()).filter(Boolean);
 }
 
 /** Text outside quotes (to look for command substitution that would really run). */
@@ -88,7 +88,9 @@ export function decide(tool: string, input: Record<string, unknown>, root: strin
     // also PowerShell's call operator: & python …  /  & "C:\…\python.exe" …
     const bare = (p: string) => p.replace(/^&\s+/, '').replace(/^(?:(?:PYTHONIOENCODING|PYTHONUTF8)=\S+\s+)+/, '');
     const allowed = role === 'editor' ? SAFE_COMMANDS.concat(EDITOR_COMMANDS) : SAFE_COMMANDS;
-    const ok = parts.length > 0 && parts.every((part) => !/\.\.[\\/]/.test(part) && allowed.some((re) => re.test(bare(part))));
+    // any redirect left after the safe ones (to the toolkit, /dev/null, 2>&1) were removed points elsewhere
+    const strayRedirect = (part: string) => /[<>]/.test(part.replace(/"[^"]*"|'[^']*'/g, ''));
+    const ok = parts.length > 0 && parts.every((part) => !/\.\.[\\/]/.test(part) && !strayRedirect(part) && allowed.some((re) => re.test(bare(part))));
     if (ok && !subst) return { kind: 'allow' };
     return { kind: 'ask', why: `Run a command: ${cmd}` };
   }

@@ -1,5 +1,5 @@
 // Wires the 3D office to the chat drawer, top bar and settings.
-import type { AccountState, AgentEvent, AgentId, AgentInfo, ChatItem, StudioApi, UpdateInfo, UsageState } from '../shared/types';
+import type { AccountState, AgentEvent, AgentId, AgentInfo, ChatItem, ShortRow, StudioApi, TokenCount, UpdateInfo, UsageState } from '../shared/types';
 import { Office, type CameraMode } from './office/game';
 import { renderMarkdown } from './ui/markdown';
 import { mockApi } from './ui/mock';
@@ -7,6 +7,9 @@ import { mockApi } from './ui/mock';
 declare global {
   interface Window { studio?: StudioApi; __office?: Office }
 }
+const errors: string[] = ((window as unknown as { __errors: string[] }).__errors = []);
+window.addEventListener('error', (e) => errors.push(String(e.error?.stack ?? e.message)));
+window.addEventListener('unhandledrejection', (e) => errors.push(String((e.reason as Error)?.stack ?? e.reason)));
 const api: StudioApi = window.studio ?? mockApi();
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
@@ -18,10 +21,12 @@ const STARTERS: Partial<Record<AgentId, string[]>> = {
     'Which Shorts have we made so far?',
   ],
   editor: ['What are you working on?', 'Build the latest voiced Short.', 'Why did the last render fail?'],
+  reviewer: ['What did you think of the last Short?', 'Review the latest render again.', 'What do you check for?'],
 };
 const BLURB: Partial<Record<AgentId, string>> = {
   'script-writer': 'finds true stories, checks the facts, writes your script and makes the voiceover.',
   editor: 'builds the cast, sets, story, sound and captions, checks the stills, and renders on your graphics card.',
+  reviewer: 'watches every render, checks picture, captions and sound against the script, and approves it or sends Cutter a fix list.',
 };
 
 let agents: AgentInfo[] = [];
@@ -112,6 +117,7 @@ function closeChat() {
 }
 $('#closeChat').addEventListener('click', closeChat);
 window.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !$('#review').hidden) return closeReview();
   if (e.key === 'Escape' && open && !document.pointerLockElement && $('#settings').hidden) closeChat();
 });
 $('#newChat').addEventListener('click', async () => {
@@ -303,6 +309,7 @@ async function openSettings() {
   ($('#toolkitRepo') as HTMLInputElement).value = s.toolkitRepo;
   ($('#model') as HTMLSelectElement).value = s.scriptWriterModel;
   ($('#editorModel') as HTMLSelectElement).value = s.editorModel;
+  ($('#reviewerModel') as HTMLSelectElement).value = s.reviewerModel;
   $('#renderState').textContent = s.renderReady ? '· set up ✓' : '· not set up yet';
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
   ($('#dailyTime') as HTMLInputElement).value = s.dailyTime;
@@ -345,6 +352,7 @@ api.onToolkit((t) => {
   if (!t.busy && t.ok) void loadBoard();
   void updateBanner(undefined, t.busy ? t.message : null);
 });
+$('#reviewerModel').addEventListener('change', (e) => api.saveSettings({ reviewerModel: (e.target as HTMLSelectElement).value }));
 $('#editorModel').addEventListener('change', (e) => api.saveSettings({ editorModel: (e.target as HTMLSelectElement).value }));
 $('#setupRender').addEventListener('click', async () => {
   setupLines.length = 0;
@@ -426,9 +434,86 @@ $('#recheck').addEventListener('click', async () => {
 });
 
 // ---------------- pipeline board
+let boardRows: ShortRow[] = [];
 async function loadBoard() {
-  office.setBoard(await api.listShorts());
+  boardRows = await api.listShorts();
+  office.setBoard(boardRows);
+  // the review screen in the office plays the newest rendered Short
+  const latest = boardRows.find((r) => r.file);
+  office.setReviewVideo(latest?.file ? await api.fileUrl(latest.file, 'video') : null);
+  if (!$('#review').hidden) renderReviewList();
 }
+
+// ---------------- review screen
+let reviewing: string | null = null;
+const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
+const NAMES: Record<string, string> = { 'script-writer': 'Scripty', editor: 'Cutter', reviewer: 'Hawk', publisher: 'Pip' };
+function usageTable(byAgent: Partial<Record<string, TokenCount>>, total: TokenCount): string {
+  const row = (name: string, t: TokenCount) =>
+    `<tr><td>${name}</td><td>${fmt(t.input + t.output + t.cacheRead + t.cacheWrite)}</td><td>${fmt(t.output)}</td><td>${fmt(t.cacheRead)}</td><td>${t.steps}</td></tr>`;
+  return `<table class="usage-table"><tr><th>Tokens</th><th>Total</th><th>Written</th><th>From cache</th><th>Steps</th></tr>${Object.entries(byAgent)
+    .map(([k, t]) => row(NAMES[k] ?? k, t!))
+    .join('')}${row('<b>All desks</b>', total)}</table>`;
+}
+function renderReviewList() {
+  const ul = $('#reviewList');
+  ul.innerHTML = '';
+  for (const r of boardRows) {
+    const li = document.createElement('li');
+    li.className = r.id === reviewing ? 'on' : '';
+    li.innerHTML = `<b></b><span class="t"></span><div class="st"></div>`;
+    li.querySelector('b')!.textContent = r.id;
+    li.querySelector('.t')!.textContent = r.title;
+    li.querySelector('.st')!.textContent = `${r.status} · v${r.version}${r.tokens ? ` · ${fmt(r.tokens)} tokens` : ''}`;
+    li.onclick = () => void showReview(r.id);
+    ul.appendChild(li);
+  }
+  if (!boardRows.length) ul.innerHTML = '<li>No Shorts yet.</li>';
+}
+async function showReview(id: string) {
+  reviewing = id;
+  renderReviewList();
+  const info = await api.getReview(id);
+  const v = $('#reviewVideo') as HTMLVideoElement;
+  v.hidden = !info.videoUrl;
+  $('#noVideo').hidden = !!info.videoUrl;
+  if (info.videoUrl && v.dataset.src !== info.videoUrl) {
+    v.src = info.videoUrl;
+    v.dataset.src = info.videoUrl;
+  }
+  $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review) : '<p>Hawk hasn\'t reviewed this one yet.</p>';
+  $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted small">No token data yet (counted from Phase 3 on).</p>';
+  $('#reviewMsg').textContent = '';
+}
+async function openReview() {
+  $('#review').hidden = false;
+  office.inputEnabled = false;
+  boardRows = await api.listShorts();
+  renderReviewList();
+  const first = boardRows.find((r) => r.file) ?? boardRows[0];
+  if (first) await showReview(reviewing && boardRows.some((r) => r.id === reviewing) ? reviewing : first.id);
+}
+function closeReview() {
+  $('#review').hidden = true;
+  ($('#reviewVideo') as HTMLVideoElement).pause();
+  office.inputEnabled = !open;
+}
+office.onScreen = () => void openReview();
+$('#reviewBtn').addEventListener('click', () => void openReview());
+$('#closeReview').addEventListener('click', closeReview);
+$('#review').addEventListener('click', (e) => { if (e.target === $('#review')) closeReview(); });
+async function decide(approve: boolean) {
+  if (!reviewing) return;
+  const notes = ($('#reviewNotes') as HTMLTextAreaElement).value;
+  $('#reviewMsg').textContent = 'Saving…';
+  const r = await api.decideReview(reviewing, approve, notes);
+  $('#reviewMsg').textContent = r.message;
+  if (r.ok) ($('#reviewNotes') as HTMLTextAreaElement).value = '';
+  await loadBoard();
+  await showReview(reviewing);
+}
+$('#approveBtn').addEventListener('click', () => void decide(true));
+$('#changesBtn').addEventListener('click', () => void decide(false));
 
 // ---------------- start
 (async () => {

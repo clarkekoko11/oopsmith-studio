@@ -10,6 +10,9 @@ const on = <T>(channel: string, cb: (v: T) => void) => {
 
 const api: StudioApi = {
   getAgents: () => ipcRenderer.invoke('agents:list'),
+  getUsage: () => ipcRenderer.invoke('usage:get'),
+  getReview: (id) => ipcRenderer.invoke('review:get', id),
+  decideReview: (id, approve, notes) => ipcRenderer.invoke('review:decide', id, approve, notes),
   appVersion: () => ipcRenderer.invoke('app:version'),
   runDaily: () => ipcRenderer.invoke('agents:daily'),
   getHistory: (a) => ipcRenderer.invoke('agents:history', a),

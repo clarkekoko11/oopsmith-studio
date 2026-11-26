@@ -8,6 +8,7 @@ import { AGENTS, AUTOPILOT_TAG, agentMeta, instructions, LIVE_PHASE, PROMPT_VERS
 import { decide, describeTool, inside } from './permissions';
 import { agentEnv, claudeExecutable, loadSdk } from './sdk';
 import { getGeminiKey, loadSettings } from './settings';
+import { describe, recordTurn } from './usage';
 
 type Emit = (e: AgentEvent) => void;
 type UsageEmit = (u: UsageState) => void;
@@ -57,6 +58,9 @@ class AgentSession {
   private saveTimer?: NodeJS.Timeout;
 
   onTurnEnd: TurnEnd = () => {};
+  onUsage: (short: string | undefined) => void = () => {};
+  /** the Short this conversation is working on (tokens are counted against it) */
+  currentShort?: string;
   /** set while the app (not the agent) is busy for this desk, e.g. rendering */
   external?: string;
 
@@ -113,13 +117,27 @@ class AgentSession {
     this.put({ kind: 'notice', id: uid(), text, tone, at: Date.now() });
   }
 
-  /** display: what the chat shows (defaults to text). In autopilot the agent gets the autopilot tag. */
-  async send(text: string, display?: string): Promise<boolean> {
+  /**
+   * display: what the chat shows (defaults to text). In autopilot the agent gets the autopilot tag.
+   * fresh: start a new conversation (one per Short, so old Shorts don't get re-sent on every step).
+   * short: the Short this work is for (tokens are counted against it).
+   */
+  async send(text: string, display?: string, opts: { fresh?: boolean; short?: string } = {}): Promise<boolean> {
     const settings = loadSettings();
     if (!settings.toolkitPath || !existsSync(settings.toolkitPath)) {
       this.notice("The toolkit isn't on this PC yet. Open Settings → Toolkit → Clone / update.", 'warn');
       return false;
     }
+    if (opts.fresh) {
+      this.reset();
+      this.sessionId = undefined;
+      this.currentShort = opts.short;
+      this.notice(`New conversation${opts.short ? ` for ${opts.short}` : ''}.`);
+    } else if (opts.short) {
+      this.currentShort = opts.short;
+    }
+    const mentioned = /RS-\d{4}/.exec(text)?.[0];
+    if (mentioned && !opts.short) this.currentShort = mentioned;
     const tagged = settings.autopilot && !text.startsWith(AUTOPILOT_TAG) ? `${AUTOPILOT_TAG} ${text}` : text;
     this.put({ kind: 'user', id: uid(), text: display ?? text.replace(AUTOPILOT_TAG, '').trim(), at: Date.now() });
     this.setStatus('working', 'thinking…');
@@ -149,7 +167,9 @@ class AgentSession {
       options: {
         cwd: root,
         resume: this.sessionId,
-        model: (this.id === 'editor' ? settings.editorModel : settings.scriptWriterModel) || undefined,
+        model: ({ editor: settings.editorModel, reviewer: settings.reviewerModel } as Partial<Record<AgentId, string>>)[this.id] ?? settings.scriptWriterModel,
+        // a safety cap per job, so a stuck agent can't burn through the plan
+        maxTurns: { 'script-writer': 80, editor: 160, reviewer: 50, publisher: 40 }[this.id],
         systemPrompt: { type: 'preset', preset: 'claude_code', append },
         settingSources: [],
         includePartialMessages: true,
@@ -176,7 +196,9 @@ class AgentSession {
         },
       },
     });
-    this.consume(this.q, root).catch((e) => {
+    const q = this.q;
+    this.consume(q, root).catch((e) => {
+      if (this.q !== q) return; // an old conversation closing after a fresh one started
       this.notice(`The agent stopped: ${(e as Error).message}`, 'error');
       this.reset();
       this.setStatus('error');
@@ -203,7 +225,11 @@ class AgentSession {
   }
 
   private async consume(q: Query, root: string) {
-    for await (const m of q as AsyncIterable<SDKMessage>) this.handle(m, root);
+    for await (const m of q as AsyncIterable<SDKMessage>) {
+      if (this.q !== q) return; // replaced by a fresh conversation: ignore the old one
+      this.handle(m, root);
+    }
+    if (this.q !== q) return;
     this.reset();
     if (this.status === 'working') this.setStatus('idle');
   }
@@ -243,6 +269,8 @@ class AgentSession {
         for (const block of m.message.content as { type: string; text?: string; name?: string; input?: Record<string, unknown> }[]) {
           if (block.type === 'tool_use' && block.name) {
             const line = describeTool(block.name, block.input ?? {}, root);
+            const short = /RS-\d{4}/.exec(JSON.stringify(block.input ?? {}))?.[0];
+            if (short) this.currentShort = short;
             this.put({ kind: 'tool', id: uid(), text: line, at: Date.now() });
             if (this.status === 'working') this.setStatus('working', line.length > 40 ? line.slice(0, 39) + '…' : line);
           } else if (block.type === 'text' && block.text && !this.liveTextId) {
@@ -268,7 +296,13 @@ class AgentSession {
       case 'result': {
         if (m.subtype !== 'success') {
           const errs = (m as { errors?: string[] }).errors;
-          this.notice(`That turn ended early (${m.subtype})${errs?.length ? `: ${errs.join('; ')}` : ''}.`, 'warn');
+          const why = m.subtype === 'error_max_turns' ? 'it hit the step limit for one job' : m.subtype;
+          this.notice(`That job ended early (${why})${errs?.length ? `: ${errs.join('; ')}` : ''}.`, 'warn');
+        }
+        if (m.usage) {
+          const turn = recordTurn(this.currentShort, this.id, m.usage, m.num_turns ?? 0);
+          this.notice(`${this.currentShort ?? 'This job'} · ${describe(turn)}`);
+          this.onUsage(this.currentShort);
         }
         this.setStatus('idle');
         setTimeout(() => this.onTurnEnd(this.id), 0);
@@ -335,9 +369,10 @@ export class AgentManager {
     const m = agentMeta(id);
     return [{ kind: 'notice', id: 'offline', at: 0, text: `${m.name} the ${m.role} starts work in Phase ${m.phase}. Talk to Scripty at the Script Writer desk for now.` }];
   }
-  send(id: AgentId, text: string, display?: string) { return this.sessions.get(id)?.send(text, display); }
+  send(id: AgentId, text: string, display?: string, opts?: { fresh?: boolean; short?: string }) { return this.sessions.get(id)?.send(text, display, opts); }
   isIdle(id: AgentId) { const s = this.sessions.get(id); return !!s && !s.external && (s.status === 'idle' || s.status === 'error'); }
   onTurnEnd(cb: TurnEnd) { for (const s of this.sessions.values()) s.onTurnEnd = cb; }
+  onUsage(cb: (short: string | undefined) => void) { for (const s of this.sessions.values()) s.onUsage = cb; }
   /** Post something from the app itself into a desk's chat. */
   post(id: AgentId, item: NewItem) {
     this.sessions.get(id)?.put({ id: uid(), at: Date.now(), ...item } as ChatItem);

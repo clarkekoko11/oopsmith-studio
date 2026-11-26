@@ -3,12 +3,12 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentId } from '../shared/types';
-import { editorFixKickoff, editorKickoff, AUTOPILOT_TAG } from './agentDefs';
+import { editorFixKickoff, editorKickoff, editorRevisionKickoff, reviewerKickoff, AUTOPILOT_TAG } from './agentDefs';
 import type { AgentManager } from './agents';
-import { renderBusy, renderShort } from './render';
+import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
 
-type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string }> };
+type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; file?: string; version?: number }> };
 
 export class Pipeline {
   private tries = new Map<string, number>(); // `${kind}:${id}` -> attempts this session
@@ -46,14 +46,27 @@ export class Pipeline {
 
   private async step() {
     const s = loadSettings();
-    if (!s.autopilot || renderBusy()) return;
+    if (!s.autopilot) return;
     const reg = this.registry();
     if (!reg) return;
-    const editor: AgentId = 'editor';
-    if (!this.agents.isIdle(editor)) return;
     const by = (st: string) => Object.values(reg.shorts).filter((m) => m.status === st).map((m) => m.id).sort();
 
-    const waiting = [...by('ready_to_render'), ...by('voiced'), ...by('render_failed'), ...by('building')];
+    // Hawk works independently of Cutter: review what's rendered (or a review that stopped part-way)
+    const reviewer: AgentId = 'reviewer';
+    if (this.agents.isIdle(reviewer)) {
+      const toReview = [...by('in_review'), ...by('reviewing')].find((id) => reg.shorts[id].file && this.attempt('review', `${id}v${reg.shorts[id].version ?? 1}`, 2));
+      if (toReview) {
+        const m = reg.shorts[toReview];
+        const video = join(outputDir(s.toolkitPath), m.file!);
+        await this.agents.send(reviewer, reviewerKickoff(toReview, video, m.version ?? 1), `Review ${toReview} v${m.version ?? 1}`, { fresh: true, short: toReview });
+      }
+    }
+
+    if (renderBusy()) return;
+    const editor: AgentId = 'editor';
+    if (!this.agents.isIdle(editor)) return;
+
+    const waiting = [...by('ready_to_render'), ...by('voiced'), ...by('render_failed'), ...by('building'), ...by('changes_requested')];
     if (waiting.length && !s.renderReady) {
       if (!this.warnedSetup) {
         this.warnedSetup = true;
@@ -68,18 +81,24 @@ export class Pipeline {
     // 2. a failed render goes back to the Editor with the error
     const failed = by('render_failed').find((id) => this.attempt('fix', id, 2));
     if (failed) {
-      await this.agents.send(editor, editorFixKickoff(failed, reg.shorts[failed].error ?? 'unknown error'), `Render of ${failed} failed — fix it`);
+      await this.agents.send(editor, editorFixKickoff(failed, reg.shorts[failed].error ?? 'unknown error'), `Render of ${failed} failed — fix it`, { fresh: true, short: failed });
       return;
     }
-    // 3. a build that stopped part-way: continue it once
+    // 3. Hawk asked for changes: a revision (each version gets one try)
+    const changes = by('changes_requested').find((id) => this.attempt('revise', `${id}v${reg.shorts[id].version ?? 1}`, 1));
+    if (changes) {
+      await this.agents.send(editor, editorRevisionKickoff(changes), `Hawk asked for changes on ${changes}`, { fresh: true, short: changes });
+      return;
+    }
+    // 4. a build that stopped part-way: continue it once
     const stuck = by('building').find((id) => this.attempt('continue', id, 1));
     if (stuck) {
-      await this.agents.send(editor, `${AUTOPILOT_TAG} Continue building ${stuck} where you left off and get it ready to render, without asking me anything.`, `Continue ${stuck}`);
+      await this.agents.send(editor, `${AUTOPILOT_TAG} Continue building ${stuck} where you left off (check what already exists in the repo first) and get it ready to render, without asking me anything.`, `Continue ${stuck}`, { fresh: true, short: stuck });
       return;
     }
-    // 4. new work from Scripty
+    // 5. new work from Scripty
     const voiced = by('voiced').find((id) => this.attempt('build', id, 2));
-    if (voiced) await this.agents.send(editor, editorKickoff(voiced), `Build ${voiced}`);
+    if (voiced) await this.agents.send(editor, editorKickoff(voiced), `Build ${voiced}`, { fresh: true, short: voiced });
   }
 
   async render(id: string) {
@@ -97,8 +116,9 @@ export class Pipeline {
     });
     this.agents.setExternal(editor, undefined);
     if (r.ok) {
-      this.agents.post(editor, { kind: 'notice', text: `${id} is rendered.` });
+      this.agents.post(editor, { kind: 'notice', text: `${id} is rendered and goes to Hawk for review.` });
       if (r.file) this.agents.post(editor, { kind: 'media', path: r.file, source: 'video' });
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=in_review']);
     } else {
       this.agents.post(editor, { kind: 'notice', tone: 'error', text: `Render of ${id} failed: ${r.message}` });
     }

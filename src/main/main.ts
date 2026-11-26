@@ -10,9 +10,10 @@ import { checkAccount } from './account';
 import { DAILY_KICKOFF } from './agentDefs';
 import { Pipeline } from './pipeline';
 import { applyUpdate, checkForUpdate } from './updater';
-import { outputDir, setupRendering, stopJob } from './render';
+import { allUsage, totalTokens } from './usage';
+import { outputDir, setupRendering, shortsCmd, stopJob } from './render';
 import { basename } from 'node:path';
-import { cloneToolkit, pullToolkit } from './git';
+import { cloneToolkit, commitAndPush, pullToolkit } from './git';
 import { claudeExecutable } from './sdk';
 import { AgentManager } from './agents';
 import { inside } from './permissions';
@@ -33,6 +34,7 @@ const agents = new AgentManager(
 );
 const pipeline = new Pipeline(agents);
 pipeline.onChange = () => send('board:changed', null);
+agents.onUsage(() => send('board:changed', null));
 agents.onTurnEnd(() => {
   send('board:changed', null);
   void pipeline.tick();
@@ -63,12 +65,16 @@ function createWindow() {
 
 function shorts(): ShortRow[] {
   const root = loadSettings().toolkitPath;
+  const usage = allUsage();
   try {
     const reg = JSON.parse(readFileSync(join(root, 'shorts', 'registry.json'), 'utf8')) as {
-      shorts: Record<string, { id: string; title?: string; topic?: string; status?: string; version?: number }>;
+      shorts: Record<string, { id: string; title?: string; topic?: string; status?: string; version?: number; file?: string }>;
     };
     return Object.values(reg.shorts)
-      .map((s) => ({ id: s.id, title: s.title || s.topic || '(untitled)', status: s.status || 'new', version: s.version || 1 }))
+      .map((s) => {
+        const u = usage[s.id];
+        return { id: s.id, title: s.title || s.topic || '(untitled)', status: s.status || 'new', version: s.version || 1, tokens: u ? totalTokens(u.total) : undefined, file: s.file };
+      })
       .sort((a, b) => b.id.localeCompare(a.id));
   } catch {
     return [];
@@ -94,6 +100,35 @@ app.whenReady().then(() => {
   });
 
   ipcMain.handle('agents:list', () => agents.list());
+  ipcMain.handle('usage:get', () => allUsage());
+  ipcMain.handle('review:get', (_e, id: string) => {
+    const s = loadSettings();
+    const row = shorts().find((r) => r.id === id);
+    let review: string | null = null;
+    try { review = readFileSync(join(s.toolkitPath, 'shorts', id, 'review.md'), 'utf8'); } catch { /* none yet */ }
+    const video = row?.file && existsSync(join(outputDir(s.toolkitPath), row.file)) ? `toolkit://video/${encodeURIComponent(row.file)}` : null;
+    return { id, review, videoUrl: video, usage: allUsage()[id] ?? null };
+  });
+  // your own decision from the review screen overrides Hawk's
+  ipcMain.handle('review:decide', async (_e, id: string, approve: boolean, notes: string) => {
+    const s = loadSettings();
+    const file = join(s.toolkitPath, 'shorts', id, 'review.md');
+    const stamp = new Date().toLocaleString();
+    const note = notes.trim();
+    if (approve) {
+      if (note) appendFileSync(file, `\n\n## From you (${stamp})\nAPPROVED. ${note}\n`);
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=approved']);
+    } else {
+      if (!note) return { ok: false, message: 'Write what should change first.' };
+      appendFileSync(file, `\n\n## From you (${stamp}) — CHANGES\n${note}\n`);
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['revise', id, `You: ${note.split('\n')[0].slice(0, 120)}`]);
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=changes_requested']);
+    }
+    const g = await commitAndPush(s.toolkitPath, [`shorts/${id}`, 'shorts/registry.json', 'SHORTS.md'], `${id}: ${approve ? 'approved' : 'changes requested'} by you`);
+    send('board:changed', null);
+    void pipeline.tick();
+    return { ok: true, message: `${approve ? 'Approved' : 'Sent back to Cutter'}. ${g.message}` };
+  });
   ipcMain.handle('app:version', () => app.getVersion());
   const checkUpdates = async () => {
     const u = await checkForUpdate();
@@ -199,8 +234,10 @@ app.whenReady().then(() => {
 
   createWindow();
   if (process.env.OOPSMITH_SMOKE) {
+    win!.webContents.on('console-message', (e) => console.log('[renderer]', (e as unknown as { message: string }).message));
     // test mode: save a screenshot of the window and quit
     setTimeout(async () => {
+      console.log('[renderer errors]', await win!.webContents.executeJavaScript('JSON.stringify(window.__errors || [])'));
       const img = await win!.webContents.capturePage();
       writeFileSync(process.env.OOPSMITH_SMOKE!, img.toPNG());
       app.quit();
@@ -221,7 +258,7 @@ const today = () => {
 };
 async function runDaily(reason: 'manual' | 'schedule') {
   if (!agents.isIdle('script-writer')) return;
-  const started = await agents.send('script-writer', DAILY_KICKOFF, reason === 'schedule' ? "Daily run: make today's Short" : "Make today's Short");
+  const started = await agents.send('script-writer', DAILY_KICKOFF, reason === 'schedule' ? "Daily run: make today's Short" : "Make today's Short", { fresh: true });
   if (started && reason === 'schedule') saveSettings({ lastDailyRun: today() });
 }
 setInterval(() => void pipeline.tick(), 60_000);

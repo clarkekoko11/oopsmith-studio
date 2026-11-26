@@ -75,3 +75,12 @@ export async function pullToolkit(dir: string): Promise<GitResult> {
   if (r.code !== 0) return { ok: false, message: `Couldn't update the toolkit: ${r.out.trim().split('\n').pop()}` };
   return { ok: true, message: /Already up to date/i.test(r.out) ? 'Toolkit is up to date.' : 'Toolkit updated from GitHub.' };
 }
+
+/** Commit some paths and push (used when you approve or request changes from the review screen). */
+export async function commitAndPush(dir: string, paths: string[], message: string): Promise<GitResult> {
+  await git(['add', ...paths], dir);
+  const c = await git(['-c', 'user.name=Oopsmith Studio', '-c', 'user.email=studio@localhost', 'commit', '-m', message], dir);
+  if (c.code !== 0 && !/nothing to commit/i.test(c.out)) return { ok: false, message: 'Could not commit.' };
+  const p = await git(['push'], dir);
+  return p.code === 0 ? { ok: true, message: 'Saved to GitHub.' } : { ok: false, message: 'Saved locally; push to GitHub failed.' };
+}

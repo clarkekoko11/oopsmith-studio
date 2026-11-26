@@ -174,3 +174,9 @@ export async function renderShort(python: string, toolkit: string, id: string, p
 export function stopJob() {
   current?.kill();
 }
+
+/** Run tools/shorts.py with arguments (e.g. set RS-0003 status=in_review). */
+export async function shortsCmd(python: string, toolkit: string, args: string[]): Promise<{ ok: boolean; out: string }> {
+  const r = await capture(python, toolkit, ['tools/shorts.py', ...args]);
+  return { ok: r.code === 0, out: r.out };
+}

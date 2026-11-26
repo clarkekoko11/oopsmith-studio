@@ -204,12 +204,13 @@ export function buildOffice(scene: THREE.Scene) {
       g.fillText(r.id, 56, y);
       g.fillStyle = '#eef1fa';
       g.font = '600 32px system-ui, sans-serif';
-      const t = r.title.length > 52 ? r.title.slice(0, 51) + '…' : r.title;
+      const t = r.title.length > 40 ? r.title.slice(0, 39) + '…' : r.title;
       g.fillText(t, 250, y);
       g.fillStyle = /failed/.test(r.status) ? '#ff6b8b' : /delivered|uploaded|published/.test(r.status) ? '#7be07b' : '#ffd34d';
       g.font = '700 28px system-ui, sans-serif';
       g.textAlign = 'right';
-      g.fillText(`${r.status} · v${r.version}`, 1540, y);
+      const tok = r.tokens ? ` · ${r.tokens >= 1e6 ? (r.tokens / 1e6).toFixed(1) + 'M' : Math.round(r.tokens / 1e3) + 'k'} tok` : '';
+      g.fillText(`${r.status} · v${r.version}${tok}`, 1540, y);
       g.textAlign = 'left';
     });
     board.needsUpdate = true;
@@ -228,12 +229,14 @@ export function buildOffice(scene: THREE.Scene) {
     g.fillStyle = '#c9cee0';
     g.font = '700 40px system-ui, sans-serif';
     g.textAlign = 'center';
-    g.fillText('Review screen — Phase 3', 400, 350);
+    g.fillText('Review screen — click to open', 400, 350);
   });
   const tv = mesh(new THREE.PlaneGeometry(7, 3.94), new THREE.MeshBasicMaterial({ map: review }), 14.5, 5.2, -D + 0.36, false);
   const tvFrame = mesh(new THREE.BoxGeometry(7.4, 4.3, 0.3), std('#1d1f2a', 0.4), 14.5, 5.2, -D + 0.2);
   scene.add(tvFrame, tv);
   walls[0].trims.push(tv, tvFrame);
+  tv.userData.screen = 'review';
+  tvFrame.userData.screen = 'review';
 
   // ---- desks: two on the left wall, two on the right, agents stand behind them facing the room
   const deskTop = std('#f4f1ea', 0.5);
@@ -392,5 +395,5 @@ export function buildOffice(scene: THREE.Scene) {
   ceiling.visible = false;
   scene.add(ceiling);
 
-  return { colliders, walls, desks, pickFloor, drawBoard, ceiling };
+  return { colliders, walls, desks, pickFloor, drawBoard, ceiling, tv, reviewPoster: review };
 }

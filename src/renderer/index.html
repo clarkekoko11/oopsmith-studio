@@ -18,6 +18,7 @@
     </div>
     <button id="updateChip" class="chip update" hidden title="A new version is on GitHub">⬆ Update</button>
     <button id="autopilot" class="chip toggle" title="Autopilot: agents decide everything themselves and never ask you">Autopilot <b>ON</b></button>
+    <button id="reviewBtn" class="chip" title="Watch renders, read Hawk's reviews, approve or send back">🎬 Review</button>
     <button id="runToday" class="chip run" title="Scripty makes today's Short from start to finish">▶ Make today's Short</button>
     <div class="seg" id="camseg" role="tablist" aria-label="Camera">
       <button data-mode="topdown" role="tab">Top-down</button>
@@ -55,6 +56,25 @@
       </div>
     </form>
   </aside>
+
+  <div id="review" class="modal" hidden>
+    <div class="sheet wide" role="dialog" aria-labelledby="reviewTitle">
+      <div class="review-head"><h2 id="reviewTitle">Review screen</h2><button class="icon" id="closeReview" aria-label="Close">✕</button></div>
+      <div class="review-body">
+        <ul id="reviewList"></ul>
+        <div class="review-main">
+          <div class="player"><video id="reviewVideo" controls playsinline></video><div id="noVideo" class="muted small">No render yet.</div></div>
+          <div class="review-side">
+            <div id="reviewText" class="msg agent"></div>
+            <div id="reviewUsage"></div>
+            <textarea id="reviewNotes" rows="3" placeholder="Your notes (needed to request changes)"></textarea>
+            <div class="field"><button id="approveBtn">Approve</button><button class="ghost" id="changesBtn">Request changes</button></div>
+            <p class="muted small" id="reviewMsg"></p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div id="settings" class="modal" hidden>
     <div class="sheet" role="dialog" aria-labelledby="settingsTitle">
@@ -107,21 +127,25 @@
       <section class="two">
         <label>Editor model
           <select id="editorModel">
-            <option value="">Account default</option>
-            <option value="opus">Opus (best results)</option>
             <option value="sonnet">Sonnet (balanced)</option>
+            <option value="opus">Opus (best results)</option>
             <option value="haiku">Haiku (lightest)</option>
           </select>
         </label>
-        <span></span>
+        <label>Reviewer model
+          <select id="reviewerModel">
+            <option value="sonnet">Sonnet (balanced)</option>
+            <option value="opus">Opus (best results)</option>
+            <option value="haiku">Haiku (lightest)</option>
+          </select>
+        </label>
       </section>
 
       <section class="two">
         <label>Script Writer model
           <select id="model">
-            <option value="">Account default</option>
-            <option value="opus">Opus (best writing)</option>
             <option value="sonnet">Sonnet (balanced)</option>
+            <option value="opus">Opus (best writing)</option>
             <option value="haiku">Haiku (lightest)</option>
           </select>
         </label>

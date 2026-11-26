@@ -57,6 +57,7 @@ export interface Settings {
   toolkitPath: string;
   scriptWriterModel: string; // '' = account default
   editorModel: string;
+  reviewerModel: string;
   pythonCommand: string; // 'python' on Windows, 'python3' elsewhere
   hasGeminiKey: boolean;
   cameraMode: 'topdown' | 'firstperson';
@@ -79,15 +80,46 @@ export interface UpdateInfo {
   current?: string;
 }
 
+export interface TokenCount {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** tool calls / model turns */
+  steps: number;
+  /** finished jobs (one per message the agent handled) */
+  jobs: number;
+}
+
+export interface ShortUsage {
+  total: TokenCount;
+  byAgent: Partial<Record<AgentId, TokenCount>>;
+  updated?: number;
+}
+
 export interface ShortRow {
   id: string;
   title: string;
   status: string;
   version: number;
+  /** all tokens all desks used on this Short so far */
+  tokens?: number;
+  /** rendered video file name (in the render output folder) */
+  file?: string;
+}
+
+export interface ReviewInfo {
+  id: string;
+  review: string | null;
+  videoUrl: string | null;
+  usage: ShortUsage | null;
 }
 
 export interface StudioApi {
   getAgents(): Promise<AgentInfo[]>;
+  getUsage(): Promise<Record<string, ShortUsage>>;
+  getReview(id: string): Promise<ReviewInfo>;
+  decideReview(id: string, approve: boolean, notes: string): Promise<{ ok: boolean; message: string }>;
   appVersion(): Promise<string>;
   runDaily(): Promise<void>;
   getHistory(agent: AgentId): Promise<ChatItem[]>;

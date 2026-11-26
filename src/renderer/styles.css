@@ -145,3 +145,29 @@ button.ghost { border: 1px solid var(--line); background: var(--panel-2); border
 .two label span { justify-content: flex-start; }
 #setupLog { max-height: 180px; overflow: auto; background: #0007; border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; font: 11.5px/1.45 ui-monospace, Consolas, monospace; color: #c9cee0; white-space: pre-wrap; margin: 6px 0 0; }
 .chip.update { background: var(--green); color: #1b1d29; font-weight: 800; border: 0; box-shadow: 0 4px 0 #3f9a3f; cursor: pointer; }
+
+.sheet.wide { width: min(1100px, 95vw); }
+.review-head { display: flex; align-items: center; justify-content: space-between; }
+.review-body { display: grid; grid-template-columns: 230px 1fr; gap: 16px; }
+#reviewList { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; max-height: 62vh; overflow-y: auto; }
+#reviewList li { padding: 9px 11px; border-radius: 10px; background: var(--panel-2); cursor: pointer; font-size: 13px; border: 1px solid transparent; }
+#reviewList li.on { border-color: var(--yellow); }
+#reviewList li b { display: block; color: var(--yellow); font-family: ui-monospace, Consolas, monospace; }
+#reviewList li .st { font-size: 11.5px; color: var(--muted); }
+.review-main { display: grid; grid-template-columns: minmax(220px, 300px) 1fr; gap: 16px; align-items: start; }
+.player { background: #000; border-radius: 14px; aspect-ratio: 9 / 16; display: grid; place-items: center; overflow: hidden; }
+.player video { width: 100%; height: 100%; object-fit: contain; }
+.review-side { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.review-side .msg { max-width: none; max-height: 34vh; overflow-y: auto; }
+.review-side textarea { width: 100%; resize: vertical; background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; }
+#approveBtn { border: 0; background: var(--green); color: #1b1d29; font-weight: 800; border-radius: 10px; padding: 8px 16px; cursor: pointer; }
+.usage-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.usage-table td, .usage-table th { padding: 4px 6px; border-bottom: 1px solid var(--line); text-align: right; }
+.usage-table td:first-child, .usage-table th:first-child { text-align: left; }
+.usage-table th { color: var(--muted); font-weight: 600; }
+.chip, .seg button, .brand { white-space: nowrap; }
+#account { max-width: 230px; overflow: hidden; text-overflow: ellipsis; display: block; }
+#topbar { gap: 8px; }
+.chip { padding: 9px 12px; }
+@media (max-width: 1600px) { .usage .label { display: none; } .usage .meter { width: 70px; } }
+@media (max-width: 1400px) { .brand b + * { display: none; } #account { max-width: 160px; } }

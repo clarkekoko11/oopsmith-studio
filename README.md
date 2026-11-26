@@ -1,12 +1,23 @@
-# Oopsmith Studio — Phase 2
+# Oopsmith Studio — Phase 3
 
-A walkable 3D office where AI agents make your Oopsmith Shorts. Two desks are working:
-**Scripty, the Script Writer** and **Cutter, the Editor**. The Reviewer and Publisher come online in Phases 3–4.
+A walkable 3D office where AI agents make your Oopsmith Shorts. Three desks are working:
+**Scripty, the Script Writer**, **Cutter, the Editor** and **Hawk, the Reviewer**. Pip the Publisher comes in Phase 4.
 
 **The pipeline (autopilot, no questions):** Scripty writes + voices a Short → status `voiced` → Cutter builds
 the cast, sets, story, sound and captions, runs the still checks → `ready_to_render` → the app renders it on
-your graphics card with the toolkit's render worker → `delivered` (video plays in Cutter's chat and lands in
-your video folder). A failed render goes back to Cutter with the error (up to 2 fixes per Short).
+your graphics card with the toolkit's render worker → `in_review` → Hawk checks the video (size/fps/audio,
+a contact sheet of frames against the script, caption sync) → `approved`, or `changes_requested` with a fix
+list in `shorts/<ID>/review.md` → Cutter fixes those shots → re-render as v2 → Hawk again. From v3 on Hawk
+approves unless it's badly broken and lists the rest under "Needs your eye". A failed render goes back to
+Cutter with the error (up to 2 fixes per Short).
+
+**Review screen:** click the TV on the back wall (or 🎬 Review in the top bar) to watch any render, read
+Hawk's review and the tokens each desk used, and Approve or Request changes yourself — your call overrides
+Hawk's and is saved to GitHub.
+
+**Tokens per Short:** after every job the desk's chat shows what it used ("RS-0003 · 1.2M tokens (38k written
+· 1.1M re-read from cache · 85 steps)"); totals per Short are on the pipeline board and the review screen.
+Every Short (and every hand-off) starts a fresh conversation, so earlier Shorts are never re-sent.
 
 Agents run on **your own Claude plan** (Pro) through the official Claude Code login on this PC.
 The app never sees your Claude password or token.
@@ -113,7 +124,8 @@ resources/       bundled copy of viral-short-script.md (the toolkit's copy wins 
 ```
 
 ## Current limits
-- Scripty and Cutter are live; Hawk (Reviewer) and Pip (Publisher) show "arrives in Phase N".
+- Scripty, Cutter and Hawk are live; Pip (Publisher) shows "arrives in Phase 4".
+- Models default to Sonnet for every desk (Settings to change). Each job has a step cap so a stuck agent can't burn your plan.
 - One Short moves through the pipeline at a time. Building a Short uses a lot of Claude usage (many steps and still checks); on Pro, expect roughly one Short a day.
 - Plan usage appears in the top bar after the first message (it's reported with each reply).
 - Profiles / second-account switching is Phase 5; for now "Sign in / switch…" changes the one login.
