@@ -542,6 +542,8 @@ export class Office {
         else { a.action = r < 0.85 ? 'stretch' : 'think'; a.until = t + rand(4, 8); }
       } else if (t > a.until - 0.1 || (a.action !== 'stretch' && a.action !== 'think')) a.action = 'stand';
     }
+    // not walking this frame: settle out of the walk cycle, so sitting / typing / arcade poses take over
+    if (a.mode !== 'going' && a.mode !== 'returning') a.walkAmt = THREE.MathUtils.lerp(a.walkAmt, 0, 1 - Math.exp(-dt * 10));
     // face you while you talk to them, or when you stand close by
     const close = Math.hypot(this.pos.x - a.pos.x, this.pos.z - a.pos.z) < 6;
     const seated = a.mode === 'activity' && a.spot?.seatY !== undefined;
