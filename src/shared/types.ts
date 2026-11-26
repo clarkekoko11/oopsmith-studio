@@ -75,6 +75,19 @@ export interface Settings {
   /** private: you publish in YouTube Studio; scheduled: goes public at youtubeHour the next day */
   youtubeMode: 'private' | 'scheduled';
   youtubeHour: number;
+  /** Buffer channel (your YouTube channel inside Buffer) */
+  bufferChannelId: string;
+  bufferChannelName: string;
+  /** YouTube category id sent with each post (24 Entertainment, 27 Education) */
+  youtubeCategory: string;
+  /** where videos are put online for Buffer to fetch */
+  mediaHost: 'cloudinary' | 'r2';
+  cloudinaryCloud: string;
+  cloudinaryKey: string;
+  r2Account: string;
+  r2Bucket: string;
+  r2KeyId: string;
+  r2PublicBase: string;
   /** IANA time zone of the main audience; posting times are in this zone */
   audienceTimezone: string;
   /** best posting time per weekday (HH:MM in audienceTimezone); one Short per day */
@@ -122,7 +135,8 @@ export interface ReviewInfo {
   id: string;
   /** publish.md text (upload details) */
   publish: string | null;
-  youtubeId: string | null;
+  /** true once the post exists in Buffer (scheduled, draft or published) */
+  inBuffer: boolean;
   /** what the Short is waiting for right now */
   waiting: string;
   status: string;
@@ -138,10 +152,9 @@ export interface StudioApi {
   decideReview(id: string, approve: boolean, notes: string): Promise<{ ok: boolean; message: string }>;
   sendOn(id: string): Promise<string>;
   uploadNow(id: string): Promise<{ ok: boolean; message: string }>;
-  youtubeStatus(): Promise<{ hasClientSecret: boolean; signedIn: boolean; workerAutoUpload: boolean }>;
-  chooseClientSecret(): Promise<{ ok: boolean; message: string }>;
-  signInYouTube(): Promise<{ ok: boolean; message: string }>;
-  onYouTubeLog(cb: (line: string) => void): () => void;
+  publishingStatus(): Promise<{ hasBufferKey: boolean; channel: string; hostReady: boolean; missing: string | null; workerAutoUpload: boolean }>;
+  setSecret(name: 'buffer' | 'cloudinarySecret' | 'r2Secret', value: string): Promise<{ ok: boolean; message: string }>;
+  bufferChannels(): Promise<{ ok: boolean; message: string; channels: { id: string; name: string; service: string }[] }>;
   onPipelineBlocked(cb: (message: string) => void): () => void;
   appVersion(): Promise<string>;
   runDaily(): Promise<void>;

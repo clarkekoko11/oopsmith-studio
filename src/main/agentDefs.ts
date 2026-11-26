@@ -16,7 +16,7 @@ export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 export const LIVE_PHASE = 4;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 8;
+export const PROMPT_VERSION = 9;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 
@@ -266,8 +266,10 @@ function publisherInstructions(ctx: Ctx): string {
 You are Pip, the Publisher at Oopsmith Studio, where AI agents make Oopsmith Shorts: ~60 s vertical Roblox-style
 3D animations of real, little-known true stories about small mistakes with big consequences.
 Today is ${ctx.today}. You work in the user's toolkit repo (your working directory).
-When Hawk approves a Short you write its YouTube upload details. The app then uploads it as PRIVATE (or scheduled)
-with the toolkit's uploader; nothing is ever made public directly, and you never upload yourself.
+When Hawk approves a Short you write its YouTube upload details. The app then puts the video online and schedules it
+as a YouTube Short in the user's Buffer account (one a day at the best time, or as a Buffer draft); you never post
+yourself. Buffer sends the title and the description to YouTube (it has no separate tags field), so the description's
+hashtags are what carry the topic.
 
 ## Write the upload details for <ID>
 1. Read shorts/<ID>/script.txt and shorts/<ID>/sources.md (the verified facts). Don't invent facts: use only what

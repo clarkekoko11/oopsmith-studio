@@ -11,18 +11,19 @@ list in `shorts/<ID>/review.md` → Cutter fixes those shots → re-render as v2
 approves unless it's badly broken and lists the rest under "Needs your eye". A failed render goes back to
 Cutter with the error (up to 2 fixes per Short).
 
-**Publishing (Pip):** an `approved` Short goes to Pip, who writes `shorts/<ID>/publish.json` + `publish.md` (title,
-3 alternatives, description with the verified facts and a question, 15–20 tags; your skill's step 7b rules) →
-`ready_to_publish` → the app uploads it with the toolkit's `tools/youtube_upload.py` as **private** (you publish in
-YouTube Studio) or **scheduled**: one Short per day, each on the next free day at that weekday's best time in your
-audience's time zone (default US Eastern; Mon 6 PM, Tue 7 PM, Wed 6 PM, Thu 7 PM, Fri 4 PM, Sat 6 PM, Sun 5 PM —
-from Buffer's and SocialPilot's 2026 studies; edit in Settings) → `uploaded_private` / `uploaded_scheduled`, with a
-YouTube Studio link in Pip's chat and on the review screen. Never public straight away.
+**Publishing (Pip + Buffer):** an `approved` Short goes to Pip, who writes `shorts/<ID>/publish.json` + `publish.md`
+(title, 3 alternatives, description with the verified facts, a question and hashtags; your skill's step 7b rules) →
+`ready_to_publish` → the app puts the video on your video host (Cloudinary or Cloudflare R2, because Buffer fetches
+videos from a public link) and creates a YouTube Short post in Buffer → `queued_buffer` (one Short per day, each on
+the next free day at that weekday's best time in your audience's time zone; default US Eastern: Mon 6 PM, Tue 7 PM,
+Wed 6 PM, Thu 7 PM, Fri 4 PM, Sat 6 PM, Sun 5 PM — from Buffer's and SocialPilot's 2026 studies) or
+`draft_in_buffer` → after the time passes the app asks Buffer and marks it `published` (or `publish_failed` with
+Buffer's error; press "Try Buffer again" on the review screen).
 
-Connect YouTube once in Settings → YouTube: (1) choose the `client_secret.json` of a Google Cloud OAuth client
-(Desktop app, YouTube Data API v3 enabled — AUTOMATION.md step 4); (2) Sign in to YouTube (installs Google's
-packages, opens the browser). Signing in turns off the render worker's own upload, so uploads only happen after
-review. Turn off "Upload automatically" to press **Upload** yourself on the review screen.
+Set up once in Settings → Publishing: (1) Buffer API key (Buffer → Settings → API; the Free plan includes one);
+(2) pick your YouTube channel (connect it inside Buffer first); (3) video host — Cloudinary (cloud name, API key,
+API secret) or Cloudflare R2 (account ID, bucket, access key, secret, public bucket URL). Keys are encrypted on this
+PC. Saving the Buffer key turns off the render worker's own YouTube upload, so posts only go out after review.
 
 **Review screen:** click the TV on the back wall (or 🎬 Review in the top bar) to watch any render, read
 Hawk's review and the tokens each desk used, and Approve or Request changes yourself — your call overrides

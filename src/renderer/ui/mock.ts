@@ -4,7 +4,7 @@ import type { AgentEvent, AgentId, AgentInfo, ChatItem, Settings, StudioApi } fr
 export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
   const hist: Record<string, ChatItem[]> = { 'script-writer': [] };
-  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: 'sonnet', editorModel: 'sonnet', reviewerModel: 'sonnet', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false, publisherModel: 'sonnet', youtubeAutoUpload: true, youtubeMode: 'scheduled', youtubeHour: 18, audienceTimezone: 'America/New_York', postingTimes: { mon: '18:00', tue: '19:00', wed: '18:00', thu: '19:00', fri: '16:00', sat: '18:00', sun: '17:00' } };
+  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: 'sonnet', editorModel: 'sonnet', reviewerModel: 'sonnet', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false, publisherModel: 'sonnet', youtubeAutoUpload: true, youtubeMode: 'scheduled', youtubeHour: 18, bufferChannelId: 'c1', bufferChannelName: 'Oopsmith (YouTube)', youtubeCategory: '24', mediaHost: 'cloudinary', cloudinaryCloud: 'oopsmith', cloudinaryKey: '1234', r2Account: '', r2Bucket: '', r2KeyId: '', r2PublicBase: '', audienceTimezone: 'America/New_York', postingTimes: { mon: '18:00', tue: '19:00', wed: '18:00', thu: '19:00', fri: '16:00', sat: '18:00', sun: '17:00' } };
   const agents: AgentInfo[] = [
     { id: 'script-writer', name: 'Scripty', role: 'Script Writer', phase: 1, status: 'idle' },
     { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'working', activity: 'RS-0003 · rendering frames 42%' },
@@ -24,11 +24,10 @@ export function mockApi(): StudioApi {
     sendOn: async () => 'Next in line for Cutter.',
     onPipelineBlocked: () => () => {},
     uploadNow: async () => ({ ok: true, message: 'Next in line for upload.' }),
-    youtubeStatus: async () => ({ hasClientSecret: true, signedIn: true, workerAutoUpload: false }),
-    chooseClientSecret: async () => ({ ok: true, message: 'saved' }),
-    signInYouTube: async () => ({ ok: true, message: 'YouTube connected.' }),
-    onYouTubeLog: () => () => {},
-    getReview: async (id) => ({ id, status: 'uploaded_private', youtubeId: 'dQw4w9WgXcQ', publish: '# RS-0003 upload details\n\n**Title:** A Plane Ran Out of Fuel Because of ONE Math Mistake ✈️\n\n**Alternatives:** …\n\n**Tags:** Gimli Glider, Air Canada 143, Roblox story, true story', waiting: 'Uploaded to YouTube as private: publish it in YouTube Studio when you like.', review: `# ${id} v1 review — APPROVED\n\n## Checks\n- Technical: 1080x1920, 30 fps, audio, 58.2 s\n- Picture: clean, no clipping\n- Captions: in sync\n- Sound: max -1.2 dB\n\n## Notes\n- Shot at 41 s is a bit dark.`, videoUrl: null, usage: null }),
+    publishingStatus: async () => ({ hasBufferKey: true, channel: 'Oopsmith (YouTube)', hostReady: true, missing: null, workerAutoUpload: false }),
+    setSecret: async () => ({ ok: true, message: 'Saved (encrypted on this PC).' }),
+    bufferChannels: async () => ({ ok: true, message: '', channels: [{ id: 'c1', name: 'Oopsmith', service: 'youtube' }, { id: 'c2', name: 'oopsmith.shorts', service: 'tiktok' }] }),
+    getReview: async (id) => ({ id, status: 'queued_buffer', inBuffer: true, publish: '# RS-0003 upload details\n\n**Title:** A Plane Ran Out of Fuel Because of ONE Math Mistake ✈️\n\n**Alternatives:** …\n\n**Tags:** Gimli Glider, Air Canada 143, Roblox story, true story', waiting: 'Scheduled in Buffer: goes live Fri, Nov 27, 4:00 PM (New York time) · Sat 5:00 AM your time.', review: `# ${id} v1 review — APPROVED\n\n## Checks\n- Technical: 1080x1920, 30 fps, audio, 58.2 s\n- Picture: clean, no clipping\n- Captions: in sync\n- Sound: max -1.2 dB\n\n## Notes\n- Shot at 41 s is a bit dark.`, videoUrl: null, usage: null }),
     decideReview: async () => ({ ok: true, message: 'Approved (preview).' }),
     getUsage: async () => ({ 'RS-0003': { total: { input: 41000, output: 52000, cacheRead: 1830000, cacheWrite: 210000, steps: 141, jobs: 3 }, byAgent: { 'script-writer': { input: 9000, output: 8000, cacheRead: 310000, cacheWrite: 40000, steps: 24, jobs: 1 }, editor: { input: 30000, output: 41000, cacheRead: 1400000, cacheWrite: 150000, steps: 104, jobs: 1 }, reviewer: { input: 2000, output: 3000, cacheRead: 120000, cacheWrite: 20000, steps: 13, jobs: 1 } } } }),
     appVersion: async () => 'preview',

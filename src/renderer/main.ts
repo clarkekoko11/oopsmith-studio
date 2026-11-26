@@ -318,7 +318,7 @@ async function openSettings() {
   ($('#ytTz') as HTMLSelectElement).value = s.audienceTimezone;
   renderTimes(s.postingTimes);
   ($('#ytAuto') as HTMLInputElement).checked = s.youtubeAutoUpload;
-  void showYouTube();
+  void showPublishing();
   $('#renderState').textContent = s.renderReady ? '· set up ✓' : '· not set up yet';
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
   ($('#dailyTime') as HTMLInputElement).value = s.dailyTime;
@@ -396,32 +396,85 @@ $('#ytResetTimes').addEventListener('click', async () => {
   renderTimes(RESEARCHED);
 });
 $('#ytAuto').addEventListener('change', (e) => api.saveSettings({ youtubeAutoUpload: (e.target as HTMLInputElement).checked }));
-async function showYouTube() {
-  const y = await api.youtubeStatus();
-  $('#ytState').textContent = y.signedIn ? '· connected ✓' : y.hasClientSecret ? '· step 2: sign in' : '· not connected';
-  if (y.workerAutoUpload) $('#ytMsg').textContent = 'Note: your render worker is set to upload by itself before review. Signing in here turns that off, so uploads happen only after approval.';
-}
-const ytMsg = (r: { ok: boolean; message: string }) => {
-  const m = $('#ytMsg');
+// ---------------- publishing (Buffer)
+const HOST_FIELDS = ['cloudinaryCloud', 'cloudinaryKey', 'r2Account', 'r2Bucket', 'r2KeyId', 'r2PublicBase'] as const;
+const pubMsg = (r: { ok: boolean; message: string }) => {
+  const m = $('#pubMsg');
   m.textContent = r.message;
   m.className = `muted small ${r.ok ? 'ok-text' : 'bad-text'}`;
 };
-$('#ytSecret').addEventListener('click', async () => { ytMsg(await api.chooseClientSecret()); void showYouTube(); });
-const ytLines: string[] = [];
-api.onYouTubeLog((l) => {
-  ytLines.push(l);
-  if (ytLines.length > 40) ytLines.shift();
-  const log = $('#ytLog');
-  log.hidden = false;
-  log.textContent = ytLines.join('\n');
-  log.scrollTop = log.scrollHeight;
+async function showPublishing() {
+  const s = await api.getSettings();
+  for (const f of HOST_FIELDS) ($(`#${f}`) as HTMLInputElement).value = s[f];
+  ($('#mediaHost') as HTMLSelectElement).value = s.mediaHost;
+  ($('#ytCategory') as HTMLSelectElement).value = s.youtubeCategory;
+  $('#hostCloudinary').hidden = s.mediaHost !== 'cloudinary';
+  $('#hostR2').hidden = s.mediaHost !== 'r2';
+  const sel = $('#bufferChannel') as HTMLSelectElement;
+  if (s.bufferChannelId && !sel.querySelector(`option[value="${s.bufferChannelId}"]`)) {
+    sel.innerHTML = `<option value="${s.bufferChannelId}"></option>`;
+    sel.options[0].textContent = s.bufferChannelName || s.bufferChannelId;
+  }
+  sel.value = s.bufferChannelId;
+  const p = await api.publishingStatus();
+  ($('#bufferKey') as HTMLInputElement).placeholder = p.hasBufferKey ? '•••••••• saved (paste a new one to replace)' : 'Paste your Buffer API key';
+  $('#pubState').textContent = p.missing ? '· not ready' : '· ready ✓';
+  if (p.missing) pubMsg({ ok: false, message: `Still needed: ${p.missing}` });
+  else if (p.workerAutoUpload) pubMsg({ ok: false, message: "Your render worker is set to upload to YouTube by itself. Saving the Buffer key turns that off." });
+}
+async function loadChannels() {
+  const r = await api.bufferChannels();
+  if (!r.ok) return pubMsg(r);
+  const s = await api.getSettings();
+  const sel = $('#bufferChannel') as HTMLSelectElement;
+  sel.innerHTML = '<option value="">—</option>';
+  for (const c of r.channels) {
+    const o = document.createElement('option');
+    o.value = c.id;
+    o.textContent = `${c.name} (${c.service})`;
+    sel.appendChild(o);
+  }
+  const yt = r.channels.find((c) => /youtube/i.test(c.service));
+  if (!s.bufferChannelId && yt) await api.saveSettings({ bufferChannelId: yt.id, bufferChannelName: `${yt.name} (YouTube)` });
+  sel.value = (await api.getSettings()).bufferChannelId;
+  if (r.message) pubMsg({ ok: false, message: r.message });
+  void showPublishing();
+}
+$('#saveBufferKey').addEventListener('click', async () => {
+  const v = ($('#bufferKey') as HTMLInputElement).value;
+  if (!v.trim()) return pubMsg({ ok: false, message: 'Paste the key first.' });
+  pubMsg(await api.setSecret('buffer', v));
+  ($('#bufferKey') as HTMLInputElement).value = '';
+  await loadChannels();
 });
-$('#ytSignIn').addEventListener('click', async () => {
-  ytLines.length = 0;
-  ytMsg({ ok: true, message: 'Signing in… finish it in the browser window.' });
-  ytMsg(await api.signInYouTube());
-  void showYouTube();
+$('#refreshChannels').addEventListener('click', () => void loadChannels());
+$('#bufferChannel').addEventListener('change', async (e) => {
+  const sel = e.target as HTMLSelectElement;
+  await api.saveSettings({ bufferChannelId: sel.value, bufferChannelName: sel.selectedOptions[0]?.textContent ?? '' });
+  void showPublishing();
 });
+$('#mediaHost').addEventListener('change', async (e) => {
+  await api.saveSettings({ mediaHost: (e.target as HTMLSelectElement).value as 'cloudinary' | 'r2' });
+  void showPublishing();
+});
+$('#ytCategory').addEventListener('change', (e) => api.saveSettings({ youtubeCategory: (e.target as HTMLSelectElement).value }));
+for (const f of HOST_FIELDS) {
+  $(`#${f}`).addEventListener('change', async (e) => {
+    await api.saveSettings({ [f]: (e.target as HTMLInputElement).value.trim() });
+    void showPublishing();
+  });
+}
+document.querySelectorAll<HTMLButtonElement>('button[data-secret]').forEach((b) =>
+  b.addEventListener('click', async () => {
+    const name = b.dataset.secret as 'cloudinarySecret' | 'r2Secret';
+    const input = $(`#${name}`) as HTMLInputElement;
+    if (!input.value.trim()) return pubMsg({ ok: false, message: 'Paste the secret first.' });
+    pubMsg(await api.setSecret(name, input.value));
+    input.value = '';
+    input.placeholder = '•••••••• saved';
+    void showPublishing();
+  }),
+);
 $('#reviewerModel').addEventListener('change', (e) => api.saveSettings({ reviewerModel: (e.target as HTMLSelectElement).value }));
 $('#editorModel').addEventListener('change', (e) => api.saveSettings({ editorModel: (e.target as HTMLSelectElement).value }));
 $('#setupRender').addEventListener('click', async () => {
@@ -556,13 +609,12 @@ async function showReview(id: string) {
   w.querySelector('span')!.textContent = `${info.status ? info.status + ' · ' : ''}${info.waiting}`;
   ($('#sendOnBtn') as HTMLButtonElement).hidden = !/Waiting|Next in line|Rendered before/.test(info.waiting);
   const pb = $('#publishBox');
-  pb.hidden = !info.publish && !info.youtubeId;
+  pb.hidden = !info.publish && !info.inBuffer;
   $('#publishText').innerHTML = info.publish ? renderMarkdown(info.publish) : '';
   const up = $('#uploadBtn') as HTMLButtonElement;
-  up.hidden = !(info.status === 'ready_to_publish');
-  const link = $('#studioLink') as HTMLAnchorElement;
-  link.hidden = !info.youtubeId;
-  if (info.youtubeId) link.href = `https://studio.youtube.com/video/${info.youtubeId}/edit`;
+  up.hidden = !/^(ready_to_publish|publish_failed)$/.test(info.status);
+  up.textContent = info.status === 'publish_failed' ? 'Try Buffer again' : 'Schedule in Buffer';
+  ($('#studioLink') as HTMLAnchorElement).hidden = !info.inBuffer;
   $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review) : '<p>Hawk hasn\'t reviewed this one yet.</p>';
   $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted small">No token data yet (counted from Phase 3 on).</p>';
   $('#reviewMsg').textContent = '';
