@@ -2,10 +2,13 @@
 import { app } from 'electron';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentId, ShortUsage, TokenCount } from '../shared/types';
+import { MAIN_TEAM, type AgentId, type ShortUsage, type TeamId, type TokenCount } from '../shared/types';
 
 const file = () => join(app.getPath('userData'), 'usage.json');
-type Store = Record<string, ShortUsage>; // key: RS-0003, or "other" for work not tied to a Short
+type Store = Record<string, ShortUsage>; // key: RS-0003 (main team) or team:RS-0003, or "other" for work not tied to a Short
+
+/** Teams each have their own toolkit, so their Short IDs can repeat: other teams' keys carry a prefix. */
+const keyOf = (team: TeamId, short: string) => (team === MAIN_TEAM ? short : `${team}:${short}`);
 
 function load(): Store {
   try {
@@ -25,9 +28,9 @@ export interface TurnUsage {
 }
 
 /** Add one finished turn's tokens to a Short; returns that turn's count. */
-export function recordTurn(short: string | undefined, agent: AgentId, u: TurnUsage, steps: number): TokenCount {
+export function recordTurn(team: TeamId, short: string | undefined, agent: AgentId, u: TurnUsage, steps: number): TokenCount {
   const s = load();
-  const key = short ?? 'other';
+  const key = keyOf(team, short ?? 'other');
   const entry = (s[key] ??= { total: empty(), byAgent: {} });
   const turn: TokenCount = {
     input: u.input_tokens ?? 0,
@@ -52,8 +55,12 @@ export function recordTurn(short: string | undefined, agent: AgentId, u: TurnUsa
   return turn;
 }
 
-export function allUsage(): Store {
-  return load();
+/** Usage for one team's Shorts, keyed by Short ID. */
+export function allUsage(team: TeamId = MAIN_TEAM): Store {
+  const all = load();
+  if (team === MAIN_TEAM) return Object.fromEntries(Object.entries(all).filter(([k]) => !k.includes(':')));
+  const p = `${team}:`;
+  return Object.fromEntries(Object.entries(all).filter(([k]) => k.startsWith(p)).map(([k, v]) => [k.slice(p.length), v]));
 }
 
 export const totalTokens = (t: TokenCount) => t.input + t.output + t.cacheRead + t.cacheWrite;

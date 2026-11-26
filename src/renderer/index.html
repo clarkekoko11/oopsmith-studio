@@ -11,7 +11,8 @@
   <div id="tags"></div>
 
   <header id="topbar">
-    <div class="brand"><span class="logo">O</span><b>OOPSMITH</b> STUDIO</div>
+    <div class="brand"><img class="logo" src="assets/brand/mark.png" alt="" /><img class="wordmark" src="assets/brand/wordmark-reverse.png" alt="oopsmith" /><span>studio</span></div>
+    <button id="teamBtn" class="chip team" title="Teams: add, rename or remove production lines"><span class="swatch"></span><b>Team Oopsmith</b><span class="caret">▾</span></button>
     <button id="account" class="chip" title="Claude account">Checking Claude login…</button>
     <div id="usage" class="chip usage" title="Claude plan usage in the current window" hidden>
       <span class="label">Plan usage</span><span class="meter"><i></i></span><span class="val"></span>
@@ -82,6 +83,24 @@
     </div>
   </div>
 
+  <div id="teams" class="modal" hidden>
+    <div class="sheet" role="dialog" aria-labelledby="teamsTitle">
+      <div class="review-head"><h2 id="teamsTitle">Teams <span class="muted small" id="teamCount"></span></h2><button class="icon" id="closeTeams" aria-label="Close">✕</button></div>
+      <p class="muted small">Each team is a full production line (Scripty → Cutter → Hawk → Pip) working in its own toolkit repo, side by side in the studio. Teams work in parallel; renders and uploads take turns on this PC, and every extra team uses your Claude plan faster.</p>
+      <div id="teamList"></div>
+      <section>
+        <h3>Add a team</h3>
+        <div class="two">
+          <label>Name <input id="newTeamName" placeholder="e.g. Team Two" /></label>
+          <label>Toolkit repo on GitHub <input id="newTeamRepo" placeholder="owner/repo" /></label>
+        </div>
+        <p class="muted small">Use a separate toolkit repo per team (for example a copy of roblox-shorts-toolkit for a second channel), so their Shorts never collide.</p>
+        <div class="field"><button id="addTeamBtn" class="primary">Add team</button></div>
+        <p class="muted small" id="teamMsg"></p>
+      </section>
+    </div>
+  </div>
+
   <div id="settings" class="modal" hidden>
     <div class="sheet" role="dialog" aria-labelledby="settingsTitle">
       <h2 id="settingsTitle">Settings <span class="muted small" id="appVersion"></span></h2>
@@ -95,7 +114,7 @@
       </section>
 
       <section>
-        <h3>Toolkit</h3>
+        <h3>Toolkit <span class="muted small" id="toolkitTeam"></span></h3>
         <p class="muted small">The app clones your toolkit from GitHub and pulls the latest version every time it starts. Agents save their work into this clone.</p>
         <label class="small muted" for="toolkitRepo">GitHub repo</label>
         <div class="field"><input id="toolkitRepo" placeholder="owner/repo" /><button class="ghost" id="cloneToolkit">Clone / update</button></div>

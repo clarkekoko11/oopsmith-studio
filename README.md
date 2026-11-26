@@ -3,6 +3,27 @@
 A walkable 3D office where AI agents make your Oopsmith Shorts. All four desks are working:
 **Scripty, the Script Writer**, **Cutter, the Editor**, **Hawk, the Reviewer** and **Pip, the Publisher**.
 
+## The studio
+A cozy creative loft in the Oopsmith brand (colours, Bricolage Grotesque + DM Sans, logos and posters from the brand
+kit in `src/renderer/assets`). Each team works on a **production line laid out in pipeline order**, left to right:
+① Scripts → ② Edit bay → ③ Review → ④ Publish, with an arrow track on the floor and film cans riding an overhead
+rail from desk to desk. The team's pipeline board hangs on the left wall and its review screen on the right wall.
+Everyone shares the **lounge** at the front: the Oops café coffee bar, water cooler, the orange sofa, bean bags, two
+arcade cabinets, a reading nook, a record player and plants.
+
+**Idle agents have a life:** when a desk has nothing to do, its agent stretches, then wanders off for a break —
+coffee (two at the bar start chatting), the sofa, arcade, books, watering plants, gazing out the window, dancing by
+the record player. Their bubble says what they're up to. The moment work arrives they walk back and start typing;
+an agent who needs you waves. Click anyone, wherever they are, to walk over and talk — they wait for you.
+
+## Teams
+**Team chip (top left) → Teams** to add up to four teams, rename them, or remove them (back down to one). Each team is a
+full line of four agents working in **its own toolkit repo** (so Short IDs never collide), and **teams work in
+parallel**. Renders take turns on your graphics card and uploads take turns too. Every extra team uses your Claude
+plan faster. The top bar, review screen and Settings → Toolkit act on the active team (click an agent or a team's
+review screen to switch). The daily run starts a Short for every team. Removing a team stops its desks; its toolkit
+clone and chats stay on the PC. The main team keeps the original settings, chats and folders.
+
 **The pipeline (autopilot, no questions):** Scripty writes + voices a Short → status `voiced` → Cutter builds
 the cast, sets, story, sound and captions, runs the still checks → `ready_to_render` → the app renders it on
 your graphics card with the toolkit's render worker → `in_review` → Hawk checks the video (size/fps/audio,

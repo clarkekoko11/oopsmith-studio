@@ -1,58 +1,86 @@
-// The walkable office: renderer, lights, player, agents, the two camera modes, input and name tags.
+// The walkable studio: renderer, lights, player, every team's agents (and what they get up to when idle),
+// the two camera modes, input and name tags.
 import * as THREE from 'three';
-import type { AgentId, AgentStatus } from '../../shared/types';
-import { makeCharacter, type Character, type Look } from './characters';
+import type { AgentId, AgentStatus, ShortRow, TeamId } from '../../shared/types';
+import { makeCharacter, type Action, type Character, type Look } from './characters';
 import { collide, NavGrid } from './nav';
-import { buildOffice, ROOM, updateMonitor, type DeskSpot } from './world';
+import { BRAND, buildOffice, updateMonitor, type ActivitySpot, type DeskSpot, type World } from './world';
 
 export type CameraMode = 'topdown' | 'firstperson';
 
-const LOOKS: Record<AgentId | 'player', Look> = {
-  player: { skin: '#f2c9a0', shirt: '#2f6fed', pants: '#23262f', hair: '#3b2416', hairStyle: 'spiky', shirtStripe: '#ffd34d' },
-  'script-writer': { skin: '#c68c5a', shirt: '#ffb84d', pants: '#4a3b6b', hair: '#1c1410', hairStyle: 'bob', hat: 'beret', hatColor: '#c0392b', glasses: true },
-  editor: { skin: '#f5d0b0', shirt: '#24324a', pants: '#3b4252', hair: '#d9a441', hairStyle: 'short', hat: 'headphones', hatColor: '#5ec8ff' },
-  reviewer: { skin: '#8d5a3b', shirt: '#ff6b8b', pants: '#2b2d3a', hair: '#0f0f12', hairStyle: 'short', glasses: true },
-  publisher: { skin: '#ffd9b8', shirt: '#7be07b', pants: '#1f4f8a', hairStyle: 'none', hat: 'cap', hatColor: '#ff7a59' },
+// Each team's crew wears the same roles but a different palette, so you can tell lines apart.
+const BASE_LOOKS: Record<AgentId, Look> = {
+  'script-writer': { skin: '#c68c5a', shirt: BRAND.yellow, pants: '#4a3b6b', hair: '#1c1410', hairStyle: 'bob', hat: 'beret', hatColor: '#c0392b', glasses: true },
+  editor: { skin: '#f5d0b0', shirt: BRAND.sky, pants: '#3b4252', hair: '#d9a441', hairStyle: 'short', hat: 'headphones', hatColor: BRAND.plum },
+  reviewer: { skin: '#8d5a3b', shirt: BRAND.orange, pants: '#2b2d3a', hair: '#0f0f12', hairStyle: 'short', glasses: true },
+  publisher: { skin: '#ffd9b8', shirt: BRAND.violet, pants: '#1f4f8a', hairStyle: 'none', hat: 'cap', hatColor: BRAND.orange },
 };
+const TEAM_VARIANTS: Partial<Look>[] = [
+  {},
+  { skin: '#e8b48a', hair: '#7a3b1c', pants: '#2c2a3a' },
+  { skin: '#9a6440', hair: '#2a1a12', pants: '#5a4a2a' },
+  { skin: '#f2c9a0', hair: '#c9a24a', pants: '#3a2a4a' },
+];
+const PLAYER_LOOK: Look = { skin: '#f2c9a0', shirt: BRAND.plum, pants: '#23262f', hair: '#3b2416', hairStyle: 'spiky', shirtStripe: BRAND.orange };
 
+type Mode = 'desk' | 'going' | 'activity' | 'returning';
 interface AgentActor {
+  key: string;
+  team: TeamId;
   id: AgentId;
   ch: Character;
   desk: DeskSpot;
   tag: HTMLDivElement;
   status: AgentStatus;
   talking: boolean;
-  phase: number;
+  pos: THREE.Vector3;
+  heading: number;
+  walkPhase: number;
+  walkAmt: number;
+  path: [number, number][];
+  /** exact point to finish on after the path (spots can sit inside furniture) */
+  final: THREE.Vector3 | null;
+  mode: Mode;
+  spot: ActivitySpot | null;
+  action: Action;
+  /** time the current activity / desk idle ends */
+  until: number;
+  seatY: number;
+  /** you're walking over to talk to them: they wait for you */
+  held: boolean;
 }
 
-const TOPDOWN_PITCH = 0.92; // radians above the floor
+const TOPDOWN_PITCH = 0.95; // radians above the floor
 const WALK_SPEED = 14;
+const AGENT_SPEED = 6.5;
+const rand = (a: number, b: number) => a + Math.random() * (b - a);
 
 export class Office {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 400);
+  readonly camera = new THREE.PerspectiveCamera(42, 1, 0.1, 500);
   mode: CameraMode = 'topdown';
   inputEnabled = true;
-  onTalk: (a: AgentId) => void = () => {};
+  onTalk: (team: TeamId, a: AgentId) => void = () => {};
   onMode: (m: CameraMode) => void = () => {};
-  onHint: (text: string | null) => void = () => {};
-  onScreen: () => void = () => {};
-  private videoEl?: HTMLVideoElement;
+  onHint: (key: string | null) => void = () => {};
+  onScreen: (team: TeamId) => void = () => {};
+  private videos = new Map<TeamId, HTMLVideoElement>();
 
   private player: Character;
   private pos = new THREE.Vector3(0, 0, 11.5);
-  private heading = Math.PI; // facing the back wall
+  private heading = Math.PI;
   private walkPhase = 0;
   private walkAmount = 0;
   private path: [number, number][] = [];
-  private goalAgent: AgentId | null = null;
+  private goalAgent: string | null = null;
   private agents: AgentActor[] = [];
-  private office: ReturnType<typeof buildOffice>;
-  private nav: NavGrid;
+  private world!: World;
+  private nav!: NavGrid;
   private keys = new Set<string>();
-  private yaw = 0; // top-down orbit angle
+  private yaw = 0;
   private zoom = 50;
+  private maxZoom = 80;
   private fpYaw = Math.PI;
   private fpPitch = -0.08;
   private camTarget = new THREE.Vector3();
@@ -60,8 +88,12 @@ export class Office {
   private timer = new THREE.Timer();
   private marker: THREE.Mesh;
   private dragging: { x: number; y: number; button: number; moved: boolean } | null = null;
-  private talkingTo: AgentId | null = null;
-  private nearAgent: AgentId | null = null;
+  private talkingTo: string | null = null;
+  private nearAgent: string | null = null;
+  private sun: THREE.DirectionalLight;
+  private lights = new THREE.Group();
+  private teamNames = new Map<TeamId, string>();
+  private t = 0;
 
   constructor(private host: HTMLElement, private tagLayer: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
@@ -69,51 +101,31 @@ export class Office {
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFShadowMap;
     this.renderer.toneMapping = THREE.NeutralToneMapping;
-    this.renderer.toneMappingExposure = 0.95;
+    this.renderer.toneMappingExposure = 1.0;
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     host.appendChild(this.renderer.domElement);
 
-    this.scene.background = new THREE.Color('#1b1d29');
-    this.scene.fog = new THREE.Fog('#1b1d29', 90, 180);
-    this.scene.add(new THREE.HemisphereLight('#dfeaff', '#6b5a4a', 1.25));
-    const sun = new THREE.DirectionalLight('#fff3df', 2.1);
-    sun.position.set(14, 30, 12);
-    sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    const s = sun.shadow.camera;
-    s.left = -28; s.right = 28; s.top = 22; s.bottom = -22; s.near = 1; s.far = 80;
-    sun.shadow.bias = -0.0005;
-    sun.shadow.normalBias = 0.06;
-    sun.shadow.radius = 4;
-    this.scene.add(sun);
-    const fill = new THREE.PointLight('#ffd9a8', 40, 40, 1.6);
-    fill.position.set(0, 8, 0);
-    this.scene.add(fill);
+    this.scene.background = new THREE.Color(BRAND.night);
+    this.scene.fog = new THREE.Fog(BRAND.night, 120, 260);
+    this.scene.add(new THREE.HemisphereLight('#ffe9cf', '#5a3b40', 1.35));
+    // late-afternoon sun through the factory windows
+    this.sun = new THREE.DirectionalLight('#ffe2b8', 2.2);
+    this.sun.castShadow = true;
+    this.sun.shadow.mapSize.set(2048, 2048);
+    this.sun.shadow.bias = -0.0005;
+    this.sun.shadow.normalBias = 0.06;
+    this.sun.shadow.radius = 4;
+    this.scene.add(this.sun, this.sun.target, this.lights);
 
-    this.office = buildOffice(this.scene);
-    this.nav = new NavGrid(ROOM.w, ROOM.d, this.office.colliders);
-
-    this.player = makeCharacter(LOOKS.player);
+    this.player = makeCharacter(PLAYER_LOOK);
     this.scene.add(this.player.root);
 
-    for (const desk of this.office.desks) {
-      const ch = makeCharacter(LOOKS[desk.agent]);
-      ch.root.position.copy(desk.stand);
-      ch.root.rotation.y = desk.facing;
-      ch.root.traverse((o) => (o.userData.agent = desk.agent));
-      this.scene.add(ch.root);
-      const tag = document.createElement('div');
-      tag.className = 'tag';
-      tagLayer.appendChild(tag);
-      this.agents.push({ id: desk.agent, ch, desk, tag, status: 'offline', talking: false, phase: Math.random() * 6 });
-    }
-
-    // click target marker
-    this.marker = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.75, 32), new THREE.MeshBasicMaterial({ color: '#ffd34d', transparent: true, opacity: 0 }));
+    this.marker = new THREE.Mesh(new THREE.RingGeometry(0.5, 0.75, 32), new THREE.MeshBasicMaterial({ color: BRAND.yellow, transparent: true, opacity: 0 }));
     this.marker.rotation.x = -Math.PI / 2;
     this.marker.position.y = 0.05;
     this.scene.add(this.marker);
 
+    this.setTeams([{ id: 'main', name: 'Team Oopsmith' }]);
     this.bindInput();
     new ResizeObserver(() => this.resize()).observe(host);
     this.resize();
@@ -121,38 +133,126 @@ export class Office {
   }
 
   // ---------- public API
-  setAgentInfo(id: AgentId, name: string, role: string, status: AgentStatus, activity?: string) {
-    const a = this.agents.find((x) => x.id === id);
+  /** (Re)build the studio for this list of teams: one production line each, plus the lounge. */
+  setTeams(teams: { id: TeamId; name: string }[]) {
+    const same = this.world && teams.length === this.world.lines.length && teams.every((t, i) => this.world.lines[i].team === t.id && this.world.lines[i].name === t.name);
+    if (same) return;
+    const old = new Map(this.agents.map((a) => [a.key, a]));
+    if (this.world) this.scene.remove(this.world.root);
+    for (const a of this.agents) { this.scene.remove(a.ch.root); a.tag.remove(); }
+    this.agents = [];
+    this.lights.clear();
+    this.teamNames = new Map(teams.map((t) => [t.id, t.name]));
+
+    this.world = buildOffice(this.scene, teams);
+    const { w, d } = this.world.room;
+    this.nav = new NavGrid(w, d, this.world.colliders);
+
+    // warm lights: one over each line, two in the lounge
+    for (const line of this.world.lines) {
+      const l = new THREE.PointLight('#ffd9a8', 55, 34, 1.5);
+      l.position.set(0, 7.2, line.z0 + 7);
+      this.lights.add(l);
+    }
+    for (const x of [-12, 12]) {
+      const l = new THREE.PointLight('#ffc98a', 60, 34, 1.5);
+      l.position.set(x, 7, d / 2 - 8);
+      this.lights.add(l);
+    }
+    this.sun.position.set(18, 34, -d / 2 + 6);
+    this.sun.target.position.set(0, 0, 0);
+    const sc = this.sun.shadow.camera;
+    sc.left = -w / 2 - 4; sc.right = w / 2 + 4; sc.top = d / 2 + 6; sc.bottom = -d / 2 - 6; sc.near = 1; sc.far = 120;
+    sc.updateProjectionMatrix();
+
+    teams.forEach((team, ti) => {
+      for (const desk of this.world.desks.filter((x) => x.team === team.id)) {
+        const look = { ...BASE_LOOKS[desk.agent], ...TEAM_VARIANTS[ti % TEAM_VARIANTS.length] };
+        const ch = makeCharacter(look);
+        ch.root.traverse((o) => (o.userData.agentKey = desk.key));
+        this.scene.add(ch.root);
+        const tag = document.createElement('div');
+        tag.className = 'tag';
+        this.tagLayer.appendChild(tag);
+        const prev = old.get(desk.key);
+        this.agents.push({
+          key: desk.key, team: team.id, id: desk.agent, ch, desk, tag,
+          status: prev?.status ?? 'offline', talking: false,
+          pos: desk.stand.clone(), heading: desk.facing, walkPhase: 0, walkAmt: 0, path: [], final: null,
+          mode: 'desk', spot: null, action: 'stand', until: this.t + rand(4, 14), seatY: 0, held: false,
+        });
+        if (prev) this.renderTag(this.agents[this.agents.length - 1], prev.tag.dataset.name ?? '', prev.tag.dataset.role ?? '', prev.tag.dataset.activity);
+      }
+    });
+
+    this.maxZoom = Math.max(60, d * 1.35);
+    this.zoom = THREE.MathUtils.clamp(this.zoom, 20, this.maxZoom);
+    if (Math.abs(this.pos.x) > w / 2 - 1 || Math.abs(this.pos.z) > d / 2 - 1 || !old.size) this.pos.copy(this.world.playerStart);
+    this.camTarget.copy(this.pos);
+    this.player.root.visible = this.mode === 'topdown';
+    this.world.ceiling.visible = this.mode === 'firstperson';
+  }
+
+  private actor(team: TeamId, id: AgentId) {
+    return this.agents.find((x) => x.team === team && x.id === id);
+  }
+
+  setAgentInfo(team: TeamId, id: AgentId, name: string, role: string, status: AgentStatus, activity?: string) {
+    const a = this.actor(team, id);
     if (!a) return;
     a.status = status;
+    this.renderTag(a, name, role, activity);
+    updateMonitor(a.desk, status === 'offline' ? 'offline' : activity && status !== 'idle' ? activity.slice(0, 26) : status);
+  }
+  private renderTag(a: AgentActor, name: string, role: string, activity?: string) {
     const label: Record<AgentStatus, string> = { idle: 'idle', working: 'working', 'needs-you': 'needs you', offline: 'offline', error: 'error' };
-    a.tag.dataset.status = status;
-    a.tag.innerHTML = `<div class="bubble"><span class="dot"></span>${esc(activity && status !== 'idle' ? activity : label[status])}</div><div class="name">${esc(name)}<span>${esc(role)}</span></div>`;
-    updateMonitor(a.desk, status === 'offline' ? `Phase ${activity?.match(/\d/)?.[0] ?? ''}` : activity && status !== 'idle' ? activity.slice(0, 26) : status);
+    a.tag.dataset.status = a.status;
+    a.tag.dataset.name = name;
+    a.tag.dataset.role = role;
+    if (activity) a.tag.dataset.activity = activity; else delete a.tag.dataset.activity;
+    const line = activity && a.status !== 'idle' ? activity : a.status === 'idle' ? this.idleLabel(a) : label[a.status];
+    const team = this.teamNames.size > 1 ? `<em>${esc(this.teamNames.get(a.team) ?? '')}</em>` : '';
+    a.tag.innerHTML = `<div class="bubble"><span class="dot"></span>${esc(line)}</div><div class="name">${esc(name)}<span>${esc(role)}</span>${team}</div>`;
   }
-  setTalking(id: AgentId | null) {
-    this.talkingTo = id;
+  private idleLabel(a: AgentActor): string {
+    if (a.mode === 'going') return 'on a break';
+    if (a.mode === 'returning') return 'heading back';
+    if (a.mode === 'activity' && a.spot) {
+      return ({ coffee: a.action === 'chat' ? 'chatting' : 'coffee break', cooler: 'getting water', sofa: 'chilling', beanbag: 'chilling', arcade: 'playing arcade', read: 'reading', armchair: 'reading', water: 'watering plants', window: 'daydreaming', record: 'vibing to records' } as Record<string, string>)[a.spot.kind] ?? 'idle';
+    }
+    return a.action === 'stretch' ? 'stretching' : a.action === 'think' ? 'thinking' : 'idle';
   }
-  setAgentSpeaking(id: AgentId, on: boolean) {
-    const a = this.agents.find((x) => x.id === id);
+  setTalking(key: string | null) {
+    if (this.talkingTo && this.talkingTo !== key) {
+      const prev = this.agents.find((a) => a.key === this.talkingTo);
+      if (prev) prev.held = false;
+    }
+    this.talkingTo = key;
+    if (key) { const a = this.agents.find((x) => x.key === key); if (a) a.held = true; }
+  }
+  setAgentSpeaking(team: TeamId, id: AgentId, on: boolean) {
+    const a = this.actor(team, id);
     if (a && a.talking !== on) {
       a.talking = on;
       a.ch.setTalking(on);
     }
   }
-  setBoard(rows: Parameters<ReturnType<typeof buildOffice>['drawBoard']>[0]) {
-    this.office.drawBoard(rows);
+  setBoard(team: TeamId, rows: ShortRow[]) {
+    this.world.lines.find((l) => l.team === team)?.drawBoard(rows);
   }
-  /** Play the latest rendered Short (muted, looping) on the review screen; null shows the poster. */
-  setReviewVideo(url: string | null) {
-    const mat = this.office.tv.material as THREE.MeshBasicMaterial;
-    if (this.videoEl?.dataset.src === (url ?? '')) return;
-    this.videoEl?.pause();
+  /** Play a team's latest rendered Short (muted, looping) on its review screen; null shows the poster. */
+  setReviewVideo(team: TeamId, url: string | null) {
+    const line = this.world.lines.find((l) => l.team === team);
+    if (!line) return;
+    const mat = line.tv.material as THREE.MeshBasicMaterial;
+    const cur = this.videos.get(team);
+    if (cur && cur.dataset.src === (url ?? '') && mat.map instanceof THREE.VideoTexture) return;
+    cur?.pause();
     if (!url) {
-      this.office.tv.scale.set(1, 1, 1);
-      mat.map = this.office.reviewPoster;
+      line.tv.scale.set(1, 1, 1);
+      mat.map = line.poster;
       mat.needsUpdate = true;
-      this.videoEl = undefined;
+      this.videos.delete(team);
       return;
     }
     const v = document.createElement('video');
@@ -166,9 +266,9 @@ export class Office {
     tex.colorSpace = THREE.SRGBColorSpace;
     mat.map = tex;
     mat.needsUpdate = true;
-    this.videoEl = v;
-    // the screen is 7 x 3.94 (16:9); the Short is 9:16, so show it as a tall picture in the middle
-    this.office.tv.scale.set((3.94 * 9) / 16 / 7, 1, 1);
+    this.videos.set(team, v);
+    // the screen is 16:9; the Short is 9:16, so show it as a tall picture in the middle
+    line.tv.scale.set((9 / 16) * (3.94 / 7), 1, 1);
   }
 
   setMode(m: CameraMode) {
@@ -181,26 +281,45 @@ export class Office {
       this.fpPitch = -0.08;
     } else if (document.pointerLockElement) document.exitPointerLock();
     this.player.root.visible = m === 'topdown';
-    this.office.ceiling.visible = m === 'firstperson';
+    this.world.ceiling.visible = m === 'firstperson';
     this.onMode(m);
   }
   toggleMode() {
     this.setMode(this.mode === 'topdown' ? 'firstperson' : 'topdown');
   }
-  walkToAgent(id: AgentId) {
-    const a = this.agents.find((x) => x.id === id);
+  /** Walk over to an agent (wherever they are right now) and start talking. */
+  walkToAgent(key: string) {
+    const a = this.agents.find((x) => x.key === key);
     if (!a) return;
     if (this.mode === 'firstperson') {
-      this.onTalk(id);
+      this.onTalk(a.team, a.id);
       return;
     }
-    const p = this.nav.path(this.pos.x, this.pos.z, a.desk.talk.x, a.desk.talk.z);
+    this.setTalking(null);
+    a.held = true;
+    let tx: number, tz: number;
+    if (a.mode === 'desk') {
+      tx = a.desk.talk.x;
+      tz = a.desk.talk.z;
+    } else {
+      const dx = this.pos.x - a.pos.x, dz = this.pos.z - a.pos.z;
+      const len = Math.hypot(dx, dz) || 1;
+      tx = a.pos.x + (dx / len) * 3.4;
+      tz = a.pos.z + (dz / len) * 3.4;
+    }
+    const p = this.nav.path(this.pos.x, this.pos.z, tx, tz);
     if (p) {
       this.path = p;
-      this.goalAgent = id;
-    }
+      this.goalAgent = key;
+    } else this.onTalk(a.team, a.id);
   }
-  /** for screenshots and tests */
+  /** Center the view on a team's line. */
+  focusTeam(team: TeamId) {
+    const line = this.world.lines.find((l) => l.team === team);
+    if (!line) return;
+    const p = this.nav.path(this.pos.x, this.pos.z, 0, line.z0 + 10.4);
+    if (p) { this.path = p; this.goalAgent = null; }
+  }
   debugTeleport(x: number, z: number, heading: number) {
     this.pos.set(x, 0, z);
     this.heading = heading;
@@ -209,6 +328,9 @@ export class Office {
   }
   setYaw(y: number) {
     this.yaw = y;
+  }
+  setZoom(z: number) {
+    this.zoom = THREE.MathUtils.clamp(z, 20, this.maxZoom);
   }
 
   // ---------- input
@@ -225,7 +347,8 @@ export class Office {
       if (k === 'v') this.toggleMode();
       if (k === 'e' && this.mode === 'firstperson' && this.nearAgent) {
         document.exitPointerLock();
-        this.onTalk(this.nearAgent);
+        const a = this.agents.find((x) => x.key === this.nearAgent)!;
+        this.onTalk(a.team, a.id);
       }
     });
     window.addEventListener('keyup', (e) => this.keys.delete(e.key.toLowerCase()));
@@ -233,7 +356,7 @@ export class Office {
     el.addEventListener('contextmenu', (e) => e.preventDefault());
     el.addEventListener('wheel', (e) => {
       if (this.mode !== 'topdown') return;
-      this.zoom = THREE.MathUtils.clamp(this.zoom + e.deltaY * 0.03, 20, 70);
+      this.zoom = THREE.MathUtils.clamp(this.zoom + e.deltaY * 0.03, 20, this.maxZoom);
     }, { passive: true });
     el.addEventListener('pointerdown', (e) => {
       if (!this.inputEnabled) return;
@@ -254,9 +377,7 @@ export class Office {
       if (this.dragging) {
         const dx = e.clientX - this.dragging.x;
         if (Math.abs(dx) + Math.abs(e.clientY - this.dragging.y) > 5) this.dragging.moved = true;
-        if (this.dragging.button === 2) {
-          this.yaw -= e.movementX * 0.006;
-        }
+        if (this.dragging.button === 2) this.yaw -= e.movementX * 0.006;
       } else {
         const hit = this.pick(e.clientX, e.clientY);
         el.style.cursor = hit.agent || hit.screen ? 'pointer' : 'default';
@@ -268,11 +389,12 @@ export class Office {
       if (!d || d.moved || d.button !== 0 || this.mode !== 'topdown' || !this.inputEnabled) return;
       if (e.target !== el) return;
       const hit = this.pick(e.clientX, e.clientY);
-      if (hit.screen) this.onScreen();
+      if (hit.screen) this.onScreen(hit.screen);
       else if (hit.agent) this.walkToAgent(hit.agent);
       else if (hit.point) {
         const p = this.nav.path(this.pos.x, this.pos.z, hit.point.x, hit.point.z);
         if (p) {
+          if (this.goalAgent) { const g = this.agents.find((a) => a.key === this.goalAgent); if (g) g.held = false; }
           this.path = p;
           this.goalAgent = null;
           this.marker.position.set(p[p.length - 1][0], 0.05, p[p.length - 1][1]);
@@ -282,21 +404,21 @@ export class Office {
     });
   }
 
-  private pick(cx: number, cy: number): { agent?: AgentId; point?: THREE.Vector3; screen?: boolean } {
+  private pick(cx: number, cy: number): { agent?: string; point?: THREE.Vector3; screen?: TeamId } {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
     const hits = this.raycaster.intersectObjects(this.scene.children, true);
     for (const h of hits) {
-      if (!h.object.visible) continue;
-      const agent = h.object.userData.agent as AgentId | undefined;
+      if (!isVisible(h.object)) continue;
+      const agent = h.object.userData.agentKey as string | undefined;
       if (agent) return { agent };
-      if (h.object.userData.screen) return { screen: true };
-      if (this.office.pickFloor.includes(h.object)) return { point: h.point };
+      if (h.object.userData.screen) return { screen: h.object.userData.screen as TeamId };
+      if (this.world.pickFloor.includes(h.object)) return { point: h.point };
     }
-    // nothing pickable in front: project onto the floor plane
+    const { w, d } = this.world.room;
     const p = new THREE.Vector3();
-    if (this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), p) && Math.abs(p.x) < ROOM.w / 2 && Math.abs(p.z) < ROOM.d / 2) return { point: p };
+    if (this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), p) && Math.abs(p.x) < w / 2 && Math.abs(p.z) < d / 2) return { point: p };
     return {};
   }
 
@@ -307,27 +429,158 @@ export class Office {
     this.camera.updateProjectionMatrix();
   }
 
+  // ---------- agent life: work at the desk; when idle, take breaks around the studio
+  private freeSpots() {
+    return this.world.spots.filter((s) => !s.taken);
+  }
+  private sendTo(a: AgentActor, x: number, z: number, final: THREE.Vector3 | null) {
+    a.path = this.nav.path(a.pos.x, a.pos.z, x, z) ?? [];
+    a.final = final;
+  }
+  private release(a: AgentActor) {
+    if (a.spot) a.spot.taken = null;
+    a.spot = null;
+    a.ch.hold(null);
+  }
+  private goBreak(a: AgentActor) {
+    const free = this.freeSpots();
+    if (!free.length) return false;
+    // coffee is popular, and a free spot next to someone already there makes a chat
+    const weights = free.map((s) => (s.kind === 'coffee' ? (this.world.spots.some((o) => o.kind === 'coffee' && o.taken) ? 4 : 2) : s.kind === 'water' ? 0.7 : 1));
+    let r = Math.random() * weights.reduce((x, y) => x + y, 0);
+    let spot = free[0];
+    for (let i = 0; i < free.length; i++) { r -= weights[i]; if (r <= 0) { spot = free[i]; break; } }
+    spot.taken = a.key;
+    a.spot = spot;
+    a.mode = 'going';
+    a.action = 'stand';
+    this.sendTo(a, spot.pos.x, spot.pos.z, spot.pos);
+    return true;
+  }
+  private goDesk(a: AgentActor) {
+    this.release(a);
+    a.mode = 'returning';
+    a.action = 'stand';
+    this.sendTo(a, a.desk.stand.x, a.desk.stand.z, a.desk.stand);
+  }
+  /** Move along the path; true when arrived. */
+  private walk(a: AgentActor, dt: number): boolean {
+    let budget = AGENT_SPEED * dt;
+    let moved = 0;
+    while (budget > 0) {
+      const target = a.path.length ? a.path[0] : a.final ? [a.final.x, a.final.z] as [number, number] : null;
+      if (!target) break;
+      const dx = target[0] - a.pos.x, dz = target[1] - a.pos.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist < 0.05) {
+        if (a.path.length) a.path.shift(); else a.final = null;
+        continue;
+      }
+      const step = Math.min(dist, budget);
+      a.pos.x += (dx / dist) * step;
+      a.pos.z += (dz / dist) * step;
+      a.heading = Math.atan2(dx, dz);
+      budget -= step;
+      moved += step;
+    }
+    a.walkPhase += moved * 0.75;
+    a.walkAmt = THREE.MathUtils.lerp(a.walkAmt, moved > 0 ? 1 : 0, 0.25);
+    return !a.path.length && !a.final;
+  }
+
+  private live(a: AgentActor, dt: number, t: number) {
+    const busy = a.status === 'working' || a.status === 'needs-you' || a.status === 'error';
+    let face = a.heading;
+    // you're coming over: wait where you are
+    if (a.held && a.mode !== 'activity' && a.mode !== 'desk') {
+      a.walkAmt = THREE.MathUtils.lerp(a.walkAmt, 0, 0.25);
+      a.action = 'stand';
+    } else if (busy && (a.mode === 'going' || a.mode === 'activity')) {
+      if (!a.held) this.goDesk(a);
+    } else if (a.mode === 'going' || a.mode === 'returning') {
+      if (this.walk(a, dt)) {
+        if (a.mode === 'going' && a.spot) {
+          a.mode = 'activity';
+          a.action = a.spot.action;
+          a.ch.hold(a.spot.prop ?? null);
+          a.until = t + (a.spot.action === 'sit' || a.spot.action === 'readSit' ? rand(14, 30) : rand(8, 18));
+        } else {
+          a.mode = 'desk';
+          a.action = 'stand';
+          a.until = t + rand(6, 16);
+        }
+      }
+    } else if (a.mode === 'activity' && a.spot) {
+      face = a.spot.facing;
+      // two people at the coffee bar have a chat
+      if (a.spot.kind === 'coffee') {
+        const other = this.agents.find((o) => o !== a && o.mode === 'activity' && o.spot?.kind === 'coffee');
+        if (other) {
+          a.action = 'chat';
+          face = Math.atan2(other.pos.x - a.pos.x, other.pos.z - a.pos.z);
+          const mine = Math.sin(t * 0.7 + (a.key < other.key ? 0 : Math.PI)) > 0;
+          if (!a.talking && this.talkingTo !== a.key) a.ch.setFace(mine && Math.sin(t * 14) > 0 ? 'talk' : 'smile');
+        } else a.action = 'drink';
+      }
+      if (t > a.until && !a.held) {
+        if (Math.random() < 0.35 && this.goBreak(a)) { /* off to the next thing */ }
+        else this.goDesk(a);
+        if ((a.mode as Mode) === 'going') this.world.spots.forEach((s) => { if (s.taken === a.key && s !== a.spot) s.taken = null; });
+      }
+    } else {
+      // at the desk
+      a.pos.lerp(a.desk.stand, 0.2);
+      face = a.desk.facing;
+      if (a.status === 'working') a.action = 'type';
+      else if (a.status === 'needs-you') a.action = 'wave';
+      else if (a.status === 'error') a.action = 'think';
+      else if (a.status === 'offline') a.action = 'stand';
+      else if (t > a.until && !a.held) {
+        // idle: take a break, or stretch at the desk for a bit
+        const r = Math.random();
+        if (r < 0.65 && this.goBreak(a)) { /* going */ }
+        else { a.action = r < 0.85 ? 'stretch' : 'think'; a.until = t + rand(4, 8); }
+      } else if (t > a.until - 0.1 || (a.action !== 'stretch' && a.action !== 'think')) a.action = 'stand';
+    }
+    // face you while you talk to them, or when you stand close by
+    const close = Math.hypot(this.pos.x - a.pos.x, this.pos.z - a.pos.z) < 6;
+    const seated = a.mode === 'activity' && a.spot?.seatY !== undefined;
+    if ((this.talkingTo === a.key || (close && a.mode === 'desk')) && !seated) face = Math.atan2(this.pos.x - a.pos.x, this.pos.z - a.pos.z);
+    if (a.mode === 'going' || a.mode === 'returning') face = a.heading;
+    if (this.talkingTo === a.key && (a.action === 'type' || a.action === 'stretch')) a.action = 'stand';
+    a.ch.root.rotation.y = lerpAngle(a.ch.root.rotation.y, face, 1 - Math.exp(-dt * 7));
+    // sit down onto the seat
+    const wantY = seated && a.walkAmt < 0.2 ? a.spot!.seatY! - 1.5 : 0;
+    a.seatY = THREE.MathUtils.lerp(a.seatY, wantY, 1 - Math.exp(-dt * 8));
+    a.ch.root.position.set(a.pos.x, a.seatY, a.pos.z);
+    const act: Action = a.walkAmt > 0.3 ? 'stand' : seated ? (a.spot!.action) : a.action;
+    a.ch.pose(a.walkAmt, a.walkPhase, t, act);
+    a.ch.update(t);
+  }
+
   // ---------- per frame
   private frame() {
     this.timer.update();
     const dt = Math.min(this.timer.getDelta(), 0.05);
-    const t = this.timer.getElapsed();
+    const t = (this.t = this.timer.getElapsed());
     let moving = false;
-    const cols = this.office.colliders;
-    const agentBlocks = this.agents.map((a) => ({ minX: a.desk.stand.x - 0.9, maxX: a.desk.stand.x + 0.9, minZ: a.desk.stand.z - 0.9, maxZ: a.desk.stand.z + 0.9 }));
+    const cols = this.world.colliders;
+    const agentBlocks = this.agents
+      .filter((a) => a.mode === 'desk' || a.mode === 'activity')
+      .map((a) => ({ minX: a.pos.x - 0.8, maxX: a.pos.x + 0.8, minZ: a.pos.z - 0.8, maxZ: a.pos.z + 0.8 }));
     const allCols = cols.concat(agentBlocks);
 
     if (this.mode === 'topdown') {
       const rot = (this.keys.has('q') ? 1 : 0) - (this.keys.has('e') ? 1 : 0);
       if (this.inputEnabled) this.yaw += rot * dt * 1.6;
-      // keyboard walking also works in top-down (relative to the camera)
       const f = (this.keys.has('w') || this.keys.has('arrowup') ? 1 : 0) - (this.keys.has('s') || this.keys.has('arrowdown') ? 1 : 0);
       const s = (this.keys.has('d') || this.keys.has('arrowright') ? 1 : 0) - (this.keys.has('a') || this.keys.has('arrowleft') ? 1 : 0);
       if ((f || s) && this.inputEnabled) {
         this.path = [];
+        if (this.goalAgent) { const g = this.agents.find((a) => a.key === this.goalAgent); if (g && this.talkingTo !== g.key) g.held = false; }
         this.goalAgent = null;
-        const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw); // camera forward on the floor
-        const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw); // camera right
+        const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
+        const rx = Math.cos(this.yaw), rz = -Math.sin(this.yaw);
         const dx = fx * f + rx * s, dz = fz * f + rz * s;
         const len = Math.hypot(dx, dz) || 1;
         moving = this.step(dx / len, dz / len, WALK_SPEED * dt, allCols);
@@ -340,11 +593,12 @@ export class Office {
           if (!this.path.length) {
             (this.marker.material as THREE.MeshBasicMaterial).opacity = 0;
             if (this.goalAgent) {
-              const a = this.agents.find((x) => x.id === this.goalAgent)!;
-              this.heading = Math.atan2(a.desk.stand.x - this.pos.x, a.desk.stand.z - this.pos.z);
-              const id = this.goalAgent;
+              const a = this.agents.find((x) => x.key === this.goalAgent);
               this.goalAgent = null;
-              this.onTalk(id);
+              if (a) {
+                this.heading = Math.atan2(a.pos.x - this.pos.x, a.pos.z - this.pos.z);
+                this.onTalk(a.team, a.id);
+              }
             }
           }
         } else {
@@ -356,7 +610,6 @@ export class Office {
       const s = (this.keys.has('d') || this.keys.has('arrowright') ? 1 : 0) - (this.keys.has('a') || this.keys.has('arrowleft') ? 1 : 0);
       if ((f || s) && this.inputEnabled) {
         const fx = Math.sin(this.fpYaw), fz = Math.cos(this.fpYaw);
-        // right vector = forward rotated -90°
         const rx = -fz, rz = fx;
         const dx = fx * f + rx * s, dz = fz * f + rz * s;
         const len = Math.hypot(dx, dz) || 1;
@@ -375,30 +628,26 @@ export class Office {
     const m = this.marker.material as THREE.MeshBasicMaterial;
     if (m.opacity > 0) this.marker.scale.setScalar(1 + Math.sin(t * 6) * 0.08);
 
-    // agents: idle, face you while you talk to them
     this.nearAgent = null;
     for (const a of this.agents) {
-      const close = Math.hypot(a.desk.talk.x - this.pos.x, a.desk.talk.z - this.pos.z) < 6;
-      const want = this.talkingTo === a.id || close
-        ? Math.atan2(this.pos.x - a.desk.stand.x, this.pos.z - a.desk.stand.z)
-        : a.desk.facing;
-      a.ch.root.rotation.y = lerpAngle(a.ch.root.rotation.y, want, 1 - Math.exp(-dt * 6));
-      a.ch.pose(0, 0, t);
-      a.ch.update(t);
-      if (this.mode === 'firstperson' && close) {
-        const toA = Math.atan2(a.desk.stand.x - this.pos.x, a.desk.stand.z - this.pos.z);
-        if (Math.abs(angleDiff(toA, this.fpYaw)) < 0.9) this.nearAgent = a.id;
+      const was = a.mode + a.action + (a.spot?.kind ?? '');
+      this.live(a, dt, t);
+      if (a.status === 'idle' && was !== a.mode + a.action + (a.spot?.kind ?? '')) this.renderTag(a, a.tag.dataset.name ?? '', a.tag.dataset.role ?? '', a.tag.dataset.activity);
+      if (this.mode === 'firstperson' && Math.hypot(a.pos.x - this.pos.x, a.pos.z - this.pos.z) < 6) {
+        const toA = Math.atan2(a.pos.x - this.pos.x, a.pos.z - this.pos.z);
+        if (Math.abs(angleDiff(toA, this.fpYaw)) < 0.9) this.nearAgent = a.key;
       }
     }
     this.onHint(this.mode === 'firstperson' && this.nearAgent && this.inputEnabled ? this.nearAgent : null);
 
+    this.world.update(t);
     this.updateCamera(dt);
     this.updateWalls();
     this.renderer.render(this.scene, this.camera);
     this.updateTags();
   }
 
-  private step(dx: number, dz: number, dist: number, cols: typeof this.office.colliders, face = true): boolean {
+  private step(dx: number, dz: number, dist: number, cols: World['colliders'], face = true): boolean {
     const ox = this.pos.x, oz = this.pos.z;
     const [nx, nz] = collide(ox + dx * dist, oz + dz * dist, cols);
     this.pos.x = nx;
@@ -407,7 +656,6 @@ export class Office {
     this.walkPhase += moved * 0.75;
     if (face && moved > 0.001) this.heading = Math.atan2(dx, dz);
     if (moved < dist * 0.2 && this.path.length && face) {
-      // stuck against something: re-plan
       const goal = this.path[this.path.length - 1];
       this.path = this.nav.path(this.pos.x, this.pos.z, goal[0], goal[1]) ?? [];
     }
@@ -416,12 +664,14 @@ export class Office {
 
   private updateCamera(dt: number) {
     if (this.mode === 'topdown') {
-      // keep the whole office in view; lean toward you, and toward the agent you're talking to
-      const goal = new THREE.Vector3(this.pos.x * 0.35, 1, this.pos.z * 0.3 - 2);
-      const a = this.talkingTo ? this.agents.find((x) => x.id === this.talkingTo) : undefined;
+      const { d } = this.world.room;
+      // follow you, leaning toward the middle of the studio; frame the agent you're talking to
+      // small studios stay framed whole; bigger ones (more teams) follow you more
+      const follow = THREE.MathUtils.clamp((d - 30) / 40, 0, 1) * 0.55 + 0.3;
+      const goal = new THREE.Vector3(this.pos.x * 0.35, 1, THREE.MathUtils.clamp(this.pos.z * follow, -d / 2 + 10, d / 2 - 10) - 4.5);
+      const a = this.talkingTo ? this.agents.find((x) => x.key === this.talkingTo) : undefined;
       if (a) {
-        goal.set((this.pos.x + a.desk.stand.x) / 2, 1, (this.pos.z + a.desk.stand.z) / 2);
-        // the chat drawer covers the right of the screen: shift the view so they sit in the free part
+        goal.set((this.pos.x + a.pos.x) / 2, 1, (this.pos.z + a.pos.z) / 2);
         const shift = this.zoom * 0.28;
         goal.x += Math.cos(this.yaw) * shift;
         goal.z += -Math.sin(this.yaw) * shift;
@@ -447,9 +697,9 @@ export class Office {
   private updateWalls() {
     const cx = this.camera.position.x - this.camTarget.x;
     const cz = this.camera.position.z - this.camTarget.z;
-    for (const w of this.office.walls) {
+    for (const w of this.world.walls) {
       const cut = this.mode === 'topdown' && w.normal.x * cx + w.normal.y * cz < -2;
-      const target = cut ? 0.14 : 1;
+      const target = cut ? 0.12 : 1;
       w.mesh.scale.y = THREE.MathUtils.lerp(w.mesh.scale.y, target, 0.2);
       for (const tr of w.trims) tr.visible = w.mesh.scale.y > 0.6;
     }
@@ -459,16 +709,21 @@ export class Office {
     const r = this.renderer.domElement.getBoundingClientRect();
     const v = new THREE.Vector3();
     for (const a of this.agents) {
-      v.set(a.desk.stand.x, a.ch.headY + 1.9, a.desk.stand.z).project(this.camera);
+      v.set(a.pos.x, a.seatY + a.ch.headY + 1.9, a.pos.z).project(this.camera);
       const visible = v.z < 1 && Math.abs(v.x) < 1.1 && Math.abs(v.y) < 1.1;
       const dist = this.camera.position.distanceTo(a.ch.root.position);
       a.tag.style.display = visible && (this.mode === 'topdown' || dist < 30) ? '' : 'none';
       a.tag.style.transform = `translate(-50%, -100%) translate(${((v.x + 1) / 2) * r.width}px, ${((1 - v.y) / 2) * r.height}px)`;
-      a.tag.classList.toggle('active', this.talkingTo === a.id);
+      a.tag.classList.toggle('active', this.talkingTo === a.key);
+      a.tag.classList.toggle('far', this.mode === 'topdown' && this.zoom > 75);
     }
   }
 }
 
+function isVisible(o: THREE.Object3D) {
+  for (let p: THREE.Object3D | null = o; p; p = p.parent) if (!p.visible) return false;
+  return true;
+}
 function lerpAngle(a: number, b: number, t: number) {
   return a + angleDiff(b, a) * t;
 }

@@ -2,6 +2,19 @@
 
 export type AgentId = 'script-writer' | 'editor' | 'reviewer' | 'publisher';
 
+/** A team is one full production line (all four desks) working on its own toolkit repo. 'main' always exists. */
+export type TeamId = string;
+export const MAIN_TEAM: TeamId = 'main';
+
+export interface TeamConfig {
+  id: TeamId;
+  name: string;
+  /** GitHub repo this team's toolkit is cloned from (main team: Settings.toolkitRepo) */
+  toolkitRepo: string;
+  /** local clone (main team: Settings.toolkitPath) */
+  toolkitPath: string;
+}
+
 export type AgentStatus = 'idle' | 'working' | 'needs-you' | 'offline' | 'error';
 
 export interface AgentInfo {
@@ -24,6 +37,7 @@ export type ChatItem =
   | { kind: 'media'; id: string; path: string; at: number; /** 'video' = file in the render output folder */ source?: 'toolkit' | 'video' };
 
 export interface AgentEvent {
+  team: TeamId;
   agent: AgentId;
   /** 'upsert' adds or replaces the item with the same id. */
   type: 'upsert' | 'status' | 'reset';
@@ -94,6 +108,10 @@ export interface Settings {
   audienceTimezone: string;
   /** best posting time per weekday (HH:MM in audienceTimezone); one Short per day */
   postingTimes: Record<'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat', string>;
+  /** name of the main team (its repo and folder are toolkitRepo / toolkitPath above) */
+  mainTeamName: string;
+  /** extra teams; each runs its own line of four agents in parallel */
+  teams: TeamConfig[];
 }
 
 export interface UpdateInfo {
@@ -150,29 +168,35 @@ export interface ReviewInfo {
 }
 
 export interface StudioApi {
-  getAgents(): Promise<AgentInfo[]>;
-  getUsage(): Promise<Record<string, ShortUsage>>;
-  getReview(id: string): Promise<ReviewInfo>;
-  decideReview(id: string, approve: boolean, notes: string): Promise<{ ok: boolean; message: string }>;
-  sendOn(id: string): Promise<string>;
-  uploadNow(id: string): Promise<{ ok: boolean; message: string }>;
-  publishingStatus(): Promise<{ hasBufferKey: boolean; channel: string; hostReady: boolean; missing: string | null; workerAutoUpload: boolean }>;
+  getAgents(team: TeamId): Promise<AgentInfo[]>;
+  listTeams(): Promise<TeamConfig[]>;
+  addTeam(name: string, repo: string): Promise<{ ok: boolean; message: string; team?: TeamConfig }>;
+  renameTeam(team: TeamId, name: string): Promise<TeamConfig[]>;
+  setTeamRepo(team: TeamId, repo: string): Promise<TeamConfig[]>;
+  removeTeam(team: TeamId): Promise<{ ok: boolean; message: string }>;
+  onTeams(cb: (t: TeamConfig[]) => void): () => void;
+  getUsage(team: TeamId): Promise<Record<string, ShortUsage>>;
+  getReview(team: TeamId, id: string): Promise<ReviewInfo>;
+  decideReview(team: TeamId, id: string, approve: boolean, notes: string): Promise<{ ok: boolean; message: string }>;
+  sendOn(team: TeamId, id: string): Promise<string>;
+  uploadNow(team: TeamId, id: string): Promise<{ ok: boolean; message: string }>;
+  publishingStatus(team: TeamId): Promise<{ hasBufferKey: boolean; channel: string; hostReady: boolean; missing: string | null; workerAutoUpload: boolean }>;
   setSecret(name: 'buffer' | 'cloudinarySecret' | 'r2Secret', value: string): Promise<{ ok: boolean; message: string }>;
   bufferChannels(): Promise<{ ok: boolean; message: string; channels: { id: string; name: string; service: string }[] }>;
-  youtubeStatus(): Promise<{ hasClientSecret: boolean; signedIn: boolean }>;
-  chooseClientSecret(): Promise<{ ok: boolean; message: string }>;
-  signInYouTube(): Promise<{ ok: boolean; message: string }>;
+  youtubeStatus(team: TeamId): Promise<{ hasClientSecret: boolean; signedIn: boolean }>;
+  chooseClientSecret(team: TeamId): Promise<{ ok: boolean; message: string }>;
+  signInYouTube(team: TeamId): Promise<{ ok: boolean; message: string }>;
   onYouTubeLog(cb: (line: string) => void): () => void;
-  markPosted(id: string, whenIso: string | null): Promise<string>;
-  unmarkPosted(id: string): Promise<string>;
-  onPipelineBlocked(cb: (message: string) => void): () => void;
+  markPosted(team: TeamId, id: string, whenIso: string | null): Promise<string>;
+  unmarkPosted(team: TeamId, id: string): Promise<string>;
+  onPipelineBlocked(cb: (p: { team: TeamId; message: string }) => void): () => void;
   appVersion(): Promise<string>;
-  runDaily(): Promise<void>;
-  getHistory(agent: AgentId): Promise<ChatItem[]>;
-  send(agent: AgentId, text: string): Promise<void>;
-  stop(agent: AgentId): Promise<void>;
-  newChat(agent: AgentId): Promise<void>;
-  answerPermission(agent: AgentId, id: string, allow: boolean): Promise<void>;
+  runDaily(team: TeamId): Promise<void>;
+  getHistory(team: TeamId, agent: AgentId): Promise<ChatItem[]>;
+  send(team: TeamId, agent: AgentId, text: string): Promise<void>;
+  stop(team: TeamId, agent: AgentId): Promise<void>;
+  newChat(team: TeamId, agent: AgentId): Promise<void>;
+  answerPermission(team: TeamId, agent: AgentId, id: string, allow: boolean): Promise<void>;
   onEvent(cb: (e: AgentEvent) => void): () => void;
 
   getAccount(): Promise<AccountState>;
@@ -185,18 +209,18 @@ export interface StudioApi {
   saveSettings(s: Partial<Settings>): Promise<Settings>;
   setGeminiKey(key: string): Promise<{ ok: boolean; message: string }>;
   testGeminiKey(): Promise<{ ok: boolean; message: string }>;
-  pickToolkitFolder(): Promise<string | null>;
-  cloneToolkit(): Promise<{ ok: boolean; message: string }>;
-  syncToolkit(): Promise<{ ok: boolean; message: string }>;
-  onToolkit(cb: (s: { busy: boolean; ok?: boolean; message: string }) => void): () => void;
+  pickToolkitFolder(team: TeamId): Promise<string | null>;
+  cloneToolkit(team: TeamId): Promise<{ ok: boolean; message: string }>;
+  syncToolkit(team: TeamId): Promise<{ ok: boolean; message: string }>;
+  onToolkit(cb: (s: { team: TeamId; busy: boolean; ok?: boolean; message: string }) => void): () => void;
 
-  listShorts(): Promise<ShortRow[]>;
-  fileUrl(path: string, source?: 'toolkit' | 'video'): Promise<string | null>;
+  listShorts(team: TeamId): Promise<ShortRow[]>;
+  fileUrl(team: TeamId, path: string, source?: 'toolkit' | 'video'): Promise<string | null>;
   setupRendering(): Promise<{ ok: boolean; message: string }>;
   onSetup(cb: (p: { busy: boolean; ok?: boolean; activity: string; line: string }) => void): () => void;
-  openOutputFolder(): Promise<string>;
+  openOutputFolder(team: TeamId): Promise<string>;
   openSetupLog(): Promise<string>;
-  onBoardChanged(cb: () => void): () => void;
+  onBoardChanged(cb: (team: TeamId) => void): () => void;
   checkUpdate(): Promise<UpdateInfo>;
   applyUpdate(): Promise<{ ok: boolean; message: string }>;
   onUpdate(cb: (u: UpdateInfo) => void): () => void;

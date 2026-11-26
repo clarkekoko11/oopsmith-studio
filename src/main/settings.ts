@@ -44,6 +44,8 @@ function defaults(): Stored {
     r2PublicBase: '',
     audienceTimezone: 'America/New_York',
     postingTimes: { ...RESEARCHED_TIMES },
+    mainTeamName: 'Team Oopsmith',
+    teams: [],
   };
 }
 

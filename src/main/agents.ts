@@ -3,11 +3,12 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { SDKUserMessage, SDKMessage, Query } from '@anthropic-ai/claude-agent-sdk';
-import type { AgentEvent, AgentId, AgentInfo, AgentStatus, ChatItem, UsageState } from '../shared/types';
+import { MAIN_TEAM, type AgentEvent, type AgentId, type AgentInfo, type AgentStatus, type ChatItem, type TeamId, type UsageState } from '../shared/types';
 import { AGENTS, AUTOPILOT_TAG, agentMeta, instructions, LIVE_PHASE, PROMPT_VERSION } from './agentDefs';
 import { decide, describeTool, inside } from './permissions';
 import { agentEnv, claudeExecutable, loadSdk } from './sdk';
-import { getGeminiKey, loadSettings } from './settings';
+import { getGeminiKey } from './settings';
+import { settingsFor } from './teams';
 import { describe, recordTurn } from './usage';
 
 type Emit = (e: AgentEvent) => void;
@@ -64,9 +65,14 @@ class AgentSession {
   /** set while the app (not the agent) is busy for this desk, e.g. rendering */
   external?: string;
 
-  constructor(readonly id: AgentId, private emit: Emit, private usage: UsageEmit) {
+  /** main team keeps the original file names, so chats from before teams existed stay put */
+  private get historyDir() { return this.team === MAIN_TEAM ? store('history') : store('history', this.team); }
+  private get key() { return this.team === MAIN_TEAM ? this.id : `${this.team}/${this.id}`; }
+  private settings() { return settingsFor(this.team); }
+
+  constructor(readonly team: TeamId, readonly id: AgentId, private emit: Emit, private usage: UsageEmit) {
     try {
-      this.history = JSON.parse(readFileSync(store('history', `${id}.json`), 'utf8'));
+      this.history = JSON.parse(readFileSync(join(this.historyDir, `${id}.json`), 'utf8'));
       // Anything that was streaming or waiting when the app closed is finished now.
       for (const h of this.history) {
         if (h.kind === 'agent') h.streaming = false;
@@ -81,28 +87,28 @@ class AgentSession {
   /** The saved session, only if it was made with the current instructions. */
   private get sessionId(): string | undefined {
     const all = this.readSessions();
-    return all[`${this.id}:v`] === PROMPT_VERSION ? (all[this.id] as string | undefined) : undefined;
+    return all[`${this.key}:v`] === PROMPT_VERSION ? (all[this.key] as string | undefined) : undefined;
   }
   private get hasOutdatedSession(): boolean {
     const all = this.readSessions();
-    return Boolean(all[this.id]) && all[`${this.id}:v`] !== PROMPT_VERSION;
+    return Boolean(all[this.key]) && all[`${this.key}:v`] !== PROMPT_VERSION;
   }
   private set sessionId(v: string | undefined) {
     const all = this.readSessions();
-    if (v) { all[this.id] = v; all[`${this.id}:v`] = PROMPT_VERSION; } else { delete all[this.id]; delete all[`${this.id}:v`]; }
+    if (v) { all[this.key] = v; all[`${this.key}:v`] = PROMPT_VERSION; } else { delete all[this.key]; delete all[`${this.key}:v`]; }
     writeFileSync(store('sessions.json'), JSON.stringify(all, null, 2));
   }
 
   put(item: ChatItem) {
     const i = this.history.findIndex((h) => h.id === item.id);
     if (i >= 0) this.history[i] = item; else this.history.push(item);
-    this.emit({ agent: this.id, type: 'upsert', item });
+    this.emit({ team: this.team, agent: this.id, type: 'upsert', item });
     clearTimeout(this.saveTimer);
     this.saveTimer = setTimeout(() => this.save(), 400);
   }
   private save() {
-    mkdirSync(store('history'), { recursive: true });
-    writeFileSync(store('history', `${this.id}.json`), JSON.stringify(this.history.slice(-400)));
+    mkdirSync(this.historyDir, { recursive: true });
+    writeFileSync(join(this.historyDir, `${this.id}.json`), JSON.stringify(this.history.slice(-400)));
   }
   setStatus(status: AgentStatus, activity?: string) {
     if (this.external && status === 'idle') {
@@ -111,7 +117,7 @@ class AgentSession {
     }
     this.status = status;
     this.activity = activity;
-    this.emit({ agent: this.id, type: 'status', status, activity });
+    this.emit({ team: this.team, agent: this.id, type: 'status', status, activity });
   }
   notice(text: string, tone: 'info' | 'warn' | 'error' = 'info') {
     this.put({ kind: 'notice', id: uid(), text, tone, at: Date.now() });
@@ -123,7 +129,7 @@ class AgentSession {
    * short: the Short this work is for (tokens are counted against it).
    */
   async send(text: string, display?: string, opts: { fresh?: boolean; short?: string } = {}): Promise<boolean> {
-    const settings = loadSettings();
+    const settings = this.settings();
     if (!settings.toolkitPath || !existsSync(settings.toolkitPath)) {
       this.notice("The toolkit isn't on this PC yet. Open Settings → Toolkit → Clone / update.", 'warn');
       return false;
@@ -147,7 +153,7 @@ class AgentSession {
   }
 
   private async start() {
-    const settings = loadSettings();
+    const settings = this.settings();
     const root = resolve(settings.toolkitPath);
     const { query } = await loadSdk();
     this.inbox = new Inbox();
@@ -184,7 +190,7 @@ class AgentSession {
             this.notice(`Blocked: ${d.why}`, 'warn');
             return { behavior: 'deny', message: d.why };
           }
-          if (loadSettings().autopilot) {
+          if (this.settings().autopilot) {
             // hands-off: never stop to ask; anything outside the safe list is skipped
             this.notice(`Skipped (autopilot, ${tool} tool): ${d.why}`, 'warn');
             return { behavior: 'deny', message: 'Not allowed in autopilot. Find another way inside the toolkit, or skip this step and note it.' };
@@ -300,7 +306,7 @@ class AgentSession {
           this.notice(`That job ended early (${why})${errs?.length ? `: ${errs.join('; ')}` : ''}.`, 'warn');
         }
         if (m.usage) {
-          const turn = recordTurn(this.currentShort, this.id, m.usage, m.num_turns ?? 0);
+          const turn = recordTurn(this.team, this.currentShort, this.id, m.usage, m.num_turns ?? 0);
           this.notice(`${this.currentShort ?? 'This job'} · ${describe(turn)}`);
           this.onUsage(this.currentShort);
         }
@@ -345,16 +351,16 @@ class AgentSession {
     this.sessionId = undefined;
     this.history = [];
     this.save();
-    this.emit({ agent: this.id, type: 'reset' });
+    this.emit({ team: this.team, agent: this.id, type: 'reset' });
     this.setStatus('idle');
   }
 }
 
 export class AgentManager {
   private sessions = new Map<AgentId, AgentSession>();
-  constructor(private emit: Emit, private usage: UsageEmit) {
+  constructor(readonly team: TeamId, private emit: Emit, private usage: UsageEmit) {
     mkdirSync(store('history'), { recursive: true });
-    for (const a of AGENTS) if (a.phase <= LIVE_PHASE) this.sessions.set(a.id, new AgentSession(a.id, emit, usage));
+    for (const a of AGENTS) if (a.phase <= LIVE_PHASE) this.sessions.set(a.id, new AgentSession(team, a.id, emit, usage));
   }
   list(): AgentInfo[] {
     return AGENTS.map((a) => {

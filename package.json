@@ -1,6 +1,6 @@
 {
   "name": "oopsmith-studio",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "3D agent office for Oopsmith Shorts",
   "main": "dist/main.mjs",
   "scripts": {

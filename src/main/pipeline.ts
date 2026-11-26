@@ -2,7 +2,7 @@
 // A failed render goes back to the Editor (at most twice per Short) with the error.
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentId } from '../shared/types';
+import type { AgentId, TeamId } from '../shared/types';
 import { editorFixKickoff, editorKickoff, editorRevisionKickoff, publisherKickoff, reviewerKickoff, AUTOPILOT_TAG } from './agentDefs';
 import { commitAndPush } from './git';
 import { createShortPost, postStatus } from './buffer';
@@ -13,6 +13,7 @@ import { dayKey, describeSlot, nextSlot } from './schedule';
 import type { AgentManager } from './agents';
 import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
+import { settingsFor } from './teams';
 
 type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
 
@@ -35,7 +36,8 @@ export class Pipeline {
   /** when each Buffer post was last checked (to stay well inside Buffer's API limits) */
   private lastPoll = new Map<string, number>();
 
-  constructor(private agents: AgentManager, private helpers: { upload: string; status: string }) {}
+  constructor(readonly team: TeamId, private agents: AgentManager, private helpers: { upload: string; status: string }) {}
+  private settings() { return settingsFor(this.team); }
 
   requestUpload(id: string) {
     this.uploadNow.add(id);
@@ -44,7 +46,7 @@ export class Pipeline {
 
   private registry(): Reg | null {
     try {
-      return JSON.parse(readFileSync(join(loadSettings().toolkitPath, 'shorts', 'registry.json'), 'utf8')) as Reg;
+      return JSON.parse(readFileSync(join(this.settings().toolkitPath, 'shorts', 'registry.json'), 'utf8')) as Reg;
     } catch {
       return null;
     }
@@ -84,7 +86,7 @@ export class Pipeline {
     const reg = this.registry();
     const m = reg?.shorts[id];
     if (!m) return '';
-    const s = loadSettings();
+    const s = this.settings();
     const st = m.status ?? '';
     const busy = (a: AgentId) => this.agents.currentWork(a);
     if (this.why.has(id)) return this.why.get(id)!;
@@ -126,7 +128,7 @@ export class Pipeline {
   }
 
   private async step() {
-    const s = loadSettings();
+    const s = this.settings();
     const reg = this.registry();
     if (!reg) return;
     this.why.clear();
@@ -202,7 +204,7 @@ export class Pipeline {
 
   /** Put the video online, then create the Buffer post (one per day at the best time, or a draft). */
   async publish(id: string) {
-    const s = loadSettings();
+    const s = this.settings();
     const reg = this.registry();
     const m = reg?.shorts[id];
     const publisher: AgentId = 'publisher';
@@ -260,7 +262,7 @@ export class Pipeline {
 
   /** YouTube direct: upload from this PC as private, with the day's go-live time when scheduling. */
   async uploadYouTube(id: string) {
-    const s = loadSettings();
+    const s = this.settings();
     const reg = this.registry();
     const m = reg?.shorts[id];
     const publisher: AgentId = 'publisher';
@@ -306,7 +308,7 @@ export class Pipeline {
 
   /** After a scheduled YouTube video's go-live time: check that YouTube really made it public. */
   private async pollYouTube(reg: Reg) {
-    const s = loadSettings();
+    const s = this.settings();
     if (!youtubeStatus(s.toolkitPath).signedIn) return;
     const now = Date.now();
     for (const m of Object.values(reg.shorts)) {
@@ -331,7 +333,7 @@ export class Pipeline {
 
   /** You posted it yourself (or did so before the app existed): record it so nothing re-posts it and its day stays taken. */
   async markPosted(id: string, whenIso: string | null) {
-    const s = loadSettings();
+    const s = this.settings();
     const at = whenIso ? new Date(whenIso).toISOString() : new Date().toISOString();
     await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=published_manual', `publish_at=${at}`, 'error=']);
     this.manual.delete(id);
@@ -341,7 +343,7 @@ export class Pipeline {
   }
 
   async unmarkPosted(id: string) {
-    const s = loadSettings();
+    const s = this.settings();
     const ready = existsSync(join(s.toolkitPath, 'shorts', id, 'publish.json'));
     await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, `status=${ready ? 'ready_to_publish' : 'approved'}`, 'publish_at=']);
     await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${id}: not posted yet`);
@@ -352,7 +354,7 @@ export class Pipeline {
   private async pollBuffer(reg: Reg) {
     const key = getSecret('buffer');
     if (!key) return;
-    const s = loadSettings();
+    const s = this.settings();
     const now = Date.now();
     for (const m of Object.values(reg.shorts)) {
       if (m.status !== 'queued_buffer' || !m.buffer_post_id) continue;
@@ -376,7 +378,7 @@ export class Pipeline {
   }
 
   async render(id: string) {
-    const s = loadSettings();
+    const s = this.settings();
     const editor: AgentId = 'editor';
     this.agents.post(editor, { kind: 'notice', text: `Rendering ${id} on the graphics card. This can take a while; you can keep working.` });
     let lastPush = 0;

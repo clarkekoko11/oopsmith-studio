@@ -1,8 +1,9 @@
 // Wires the 3D office to the chat drawer, top bar and settings.
-import type { AccountState, AgentEvent, AgentId, AgentInfo, ChatItem, ShortRow, StudioApi, TokenCount, UpdateInfo, UsageState } from '../shared/types';
+import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type AgentInfo, type ChatItem, type ShortRow, type StudioApi, type TeamConfig, type TeamId, type TokenCount, type UpdateInfo, type UsageState } from '../shared/types';
 import { Office, type CameraMode } from './office/game';
 import { renderMarkdown } from './ui/markdown';
 import { mockApi } from './ui/mock';
+import { STATION_COLORS, TEAM_ACCENTS } from './office/world';
 
 declare global {
   interface Window { studio?: StudioApi; __office?: Office }
@@ -13,7 +14,7 @@ window.addEventListener('unhandledrejection', (e) => errors.push(String((e.reaso
 const api: StudioApi = window.studio ?? mockApi();
 const $ = <T extends HTMLElement = HTMLElement>(sel: string) => document.querySelector(sel) as T;
 
-const COLORS: Record<AgentId, string> = { 'script-writer': '#ffb84d', editor: '#5ec8ff', reviewer: '#ff6b8b', publisher: '#7be07b' };
+const COLORS: Record<AgentId, string> = STATION_COLORS;
 const STARTERS: Partial<Record<AgentId, string[]>> = {
   'script-writer': [
     'Pitch me 3 little-known true stories about tiny mistakes.',
@@ -31,9 +32,16 @@ const BLURB: Partial<Record<AgentId, string>> = {
   publisher: 'writes the title, description and tags for every approved Short and uploads it to YouTube as private or scheduled.',
 };
 
-let agents: AgentInfo[] = [];
-let open: AgentId | null = null;
-const histories = new Map<AgentId, ChatItem[]>();
+// every team has its own four agents; "active" is the team the top bar, review screen and toolkit settings act on
+let teams: TeamConfig[] = [{ id: MAIN_TEAM, name: 'Team Oopsmith', toolkitRepo: '', toolkitPath: '' }];
+let active: TeamId = MAIN_TEAM;
+const agentsBy = new Map<TeamId, AgentInfo[]>();
+const teamAgents = (t: TeamId) => agentsBy.get(t) ?? [];
+let open: { team: TeamId; id: AgentId } | null = null;
+const hkey = (t: TeamId, a: AgentId) => `${t}/${a}`;
+const histories = new Map<string, ChatItem[]>();
+const isOpen = (t: TeamId, a: AgentId) => open?.team === t && open.id === a;
+const teamName = (t: TeamId) => teams.find((x) => x.id === t)?.name ?? t;
 
 const office = new Office($('#stage'), $('#tags'));
 window.__office = office;
@@ -50,15 +58,16 @@ office.onMode = (m) => {
 document.querySelectorAll<HTMLButtonElement>('#camseg button').forEach((b) =>
   b.addEventListener('click', () => office.setMode(b.dataset.mode as CameraMode)),
 );
-office.onHint = (id) => {
+office.onHint = (key) => {
   const h = $('#hint');
-  const a = agents.find((x) => x.id === id);
+  const [t, id] = (key ?? '').split('/') as [TeamId, AgentId];
+  const a = key ? teamAgents(t).find((x) => x.id === id) : undefined;
   h.hidden = !a;
-  if (a) h.innerHTML = `<kbd>E</kbd> Talk to ${a.name}`;
+  if (a) h.innerHTML = `<kbd>E</kbd> Talk to ${a.name}${teams.length > 1 ? ` (${teamName(t)})` : ''}`;
 };
 
 // ---------------- agents + chat
-office.onTalk = (id) => openChat(id);
+office.onTalk = (team, id) => openChat(team, id);
 
 function showAutopilot(on: boolean) {
   const b = $('#autopilot');
@@ -72,21 +81,23 @@ $('#autopilot').addEventListener('click', async () => {
 });
 $('#autopilotBox').addEventListener('change', async (e) => showAutopilot((await api.saveSettings({ autopilot: (e.target as HTMLInputElement).checked })).autopilot));
 $('#dailyTime').addEventListener('change', (e) => api.saveSettings({ dailyTime: (e.target as HTMLInputElement).value }));
-$('#runToday').addEventListener('click', () => void api.runDaily());
+$('#runToday').addEventListener('click', () => void api.runDaily(active));
 
-function refreshAgent(a: AgentInfo) {
-  if (a.id === 'script-writer') ($('#runToday') as HTMLButtonElement).disabled = a.status === 'working' || a.status === 'needs-you';
-  office.setAgentInfo(a.id, a.name, a.role, a.status, a.activity);
-  if (open === a.id) {
+function refreshAgent(team: TeamId, a: AgentInfo) {
+  if (a.id === 'script-writer' && team === active) ($('#runToday') as HTMLButtonElement).disabled = a.status === 'working' || a.status === 'needs-you';
+  office.setAgentInfo(team, a.id, a.name, a.role, a.status, a.activity);
+  if (isOpen(team, a.id)) {
     $('#chat .status').textContent = a.status === 'offline' ? 'not here yet' : a.activity && a.status !== 'idle' ? a.activity : a.status;
     $('#stopBtn').hidden = a.status !== 'working' && a.status !== 'needs-you';
   }
 }
 
-async function openChat(id: AgentId) {
-  const a = agents.find((x) => x.id === id)!;
-  open = id;
-  office.setTalking(id);
+async function openChat(team: TeamId, id: AgentId) {
+  const a = teamAgents(team).find((x) => x.id === id);
+  if (!a) return;
+  open = { team, id };
+  setActive(team);
+  office.setTalking(hkey(team, id));
   office.inputEnabled = false;
   if (document.pointerLockElement) document.exitPointerLock();
   const chat = $('#chat');
@@ -96,20 +107,20 @@ async function openChat(id: AgentId) {
   av.style.background = COLORS[id];
   av.textContent = a.name[0];
   $('#chat .name').textContent = a.name;
-  $('#chat .role').textContent = a.role;
+  $('#chat .role').textContent = teams.length > 1 ? `${a.role} · ${teamName(team)}` : a.role;
   const live = a.status !== 'offline';
   ($('#input') as HTMLTextAreaElement).disabled = !live;
   ($('#sendBtn') as HTMLButtonElement).disabled = !live;
   $('#newChat').hidden = !live;
   ($('#input') as HTMLTextAreaElement).placeholder = live ? `Ask ${a.name}…` : `${a.name} arrives in Phase ${a.phase}`;
-  histories.set(id, await api.getHistory(id));
+  histories.set(hkey(team, id), await api.getHistory(team, id));
   renderMessages();
-  refreshAgent(a);
+  refreshAgent(team, a);
   if (live) setTimeout(() => $('#input').focus(), 250);
 }
 
 function closeChat() {
-  if (open) office.setAgentSpeaking(open, false);
+  if (open) office.setAgentSpeaking(open.team, open.id, false);
   open = null;
   office.setTalking(null);
   office.inputEnabled = true;
@@ -120,12 +131,13 @@ function closeChat() {
 $('#closeChat').addEventListener('click', closeChat);
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#review').hidden) return closeReview();
+  if (e.key === 'Escape' && !$('#teams').hidden) return closeTeams();
   if (e.key === 'Escape' && open && !document.pointerLockElement && $('#settings').hidden) closeChat();
 });
 $('#newChat').addEventListener('click', async () => {
-  if (open && confirm('Start a new conversation? The current one will be cleared from this desk.')) await api.newChat(open);
+  if (open && confirm('Start a new conversation? The current one will be cleared from this desk.')) await api.newChat(open.team, open.id);
 });
-$('#stopBtn').addEventListener('click', () => open && api.stop(open));
+$('#stopBtn').addEventListener('click', () => open && api.stop(open.team, open.id));
 
 const composer = $('#composer') as HTMLFormElement;
 const input = $('#input') as HTMLTextAreaElement;
@@ -148,7 +160,7 @@ function sendText(text: string) {
   if (!t || !open) return;
   input.value = '';
   input.style.height = 'auto';
-  void api.send(open, t);
+  void api.send(open.team, open.id, t);
 }
 
 const itemEls = new Map<string, HTMLElement>();
@@ -156,8 +168,8 @@ function renderMessages() {
   const box = $('#messages');
   box.innerHTML = '';
   itemEls.clear();
-  const items = (open && histories.get(open)) || [];
-  const a = agents.find((x) => x.id === open);
+  const items = (open && histories.get(hkey(open.team, open.id))) || [];
+  const a = open ? teamAgents(open.team).find((x) => x.id === open!.id) : undefined;
   if (!items.length && a && a.status !== 'offline') {
     const empty = document.createElement('div');
     empty.className = 'empty';
@@ -207,9 +219,9 @@ function upsertEl(it: ChatItem) {
       el.innerHTML = `<div class="what"></div><div class="detail"></div><div class="btns"><button class="allow">Allow</button><button class="deny">Don't allow</button></div>${it.state === 'pending' ? '' : `<div class="result">${it.state === 'allowed' ? 'Allowed' : 'Not allowed'}</div>`}`;
       el.querySelector('.what')!.textContent = 'Needs your OK: ' + it.text;
       el.querySelector('.detail')!.textContent = it.detail;
-      const agent = open!;
-      el.querySelector<HTMLButtonElement>('.allow')!.onclick = () => api.answerPermission(agent, it.id, true);
-      el.querySelector<HTMLButtonElement>('.deny')!.onclick = () => api.answerPermission(agent, it.id, false);
+      const who = open!;
+      el.querySelector<HTMLButtonElement>('.allow')!.onclick = () => api.answerPermission(who.team, who.id, it.id, true);
+      el.querySelector<HTMLButtonElement>('.deny')!.onclick = () => api.answerPermission(who.team, who.id, it.id, false);
       break;
     }
     case 'media': {
@@ -217,7 +229,7 @@ function upsertEl(it: ChatItem) {
       el.className = 'media';
       el.textContent = it.path;
       el.textContent = it.source === 'video' ? it.path.split(/[\\/]/).pop()! : it.path;
-      void api.fileUrl(it.path, it.source).then((url) => {
+      void api.fileUrl(open?.team ?? active, it.path, it.source).then((url) => {
         if (!url) return;
         const m = document.createElement(it.path.endsWith('.mp4') ? 'video' : 'audio');
         m.controls = true;
@@ -231,27 +243,29 @@ function upsertEl(it: ChatItem) {
 }
 
 api.onEvent((e: AgentEvent) => {
+  const team = e.team ?? MAIN_TEAM;
+  const k = hkey(team, e.agent);
   if (e.type === 'reset') {
-    histories.set(e.agent, []);
-    if (open === e.agent) renderMessages();
+    histories.set(k, []);
+    if (isOpen(team, e.agent)) renderMessages();
     return;
   }
   if (e.type === 'status') {
-    const a = agents.find((x) => x.id === e.agent);
+    const a = teamAgents(team).find((x) => x.id === e.agent);
     if (!a) return;
     a.status = e.status!;
     a.activity = e.activity;
-    refreshAgent(a);
-    if (e.status !== 'working') office.setAgentSpeaking(e.agent, false);
+    refreshAgent(team, a);
+    if (e.status !== 'working') office.setAgentSpeaking(team, e.agent, false);
     return;
   }
   if (e.item) {
-    const h = histories.get(e.agent) ?? [];
+    const h = histories.get(k) ?? [];
     const i = h.findIndex((x) => x.id === e.item!.id);
     if (i >= 0) h[i] = e.item; else h.push(e.item);
-    histories.set(e.agent, h);
-    if (e.item.kind === 'agent') office.setAgentSpeaking(e.agent, !!e.item.streaming);
-    if (open === e.agent) upsertEl(e.item);
+    histories.set(k, h);
+    if (e.item.kind === 'agent') office.setAgentSpeaking(team, e.agent, !!e.item.streaming);
+    if (isOpen(team, e.agent)) upsertEl(e.item);
   }
 });
 
@@ -308,8 +322,11 @@ api.onUsage((u: UsageState) => {
 // ---------------- settings
 async function openSettings() {
   const s = await api.getSettings();
-  ($('#toolkitPath') as HTMLInputElement).value = s.toolkitPath;
-  ($('#toolkitRepo') as HTMLInputElement).value = s.toolkitRepo;
+  teams = await api.listTeams();
+  const tm = teams.find((t) => t.id === active) ?? teams[0];
+  ($('#toolkitPath') as HTMLInputElement).value = tm.toolkitPath;
+  ($('#toolkitRepo') as HTMLInputElement).value = tm.toolkitRepo;
+  $('#toolkitTeam').textContent = teams.length > 1 ? `· ${tm.name}` : '';
   ($('#model') as HTMLSelectElement).value = s.scriptWriterModel;
   ($('#editorModel') as HTMLSelectElement).value = s.editorModel;
   ($('#reviewerModel') as HTMLSelectElement).value = s.reviewerModel;
@@ -339,27 +356,35 @@ $('#account').addEventListener('click', openSettings);
 $('#closeSettings').addEventListener('click', closeSettings);
 $('#settings').addEventListener('click', (e) => { if (e.target === $('#settings')) closeSettings(); });
 $('#pickToolkit').addEventListener('click', async () => {
-  const p = await api.pickToolkitFolder();
+  const p = await api.pickToolkitFolder(active);
   if (p) {
     ($('#toolkitPath') as HTMLInputElement).value = p;
     void loadBoard();
   }
 });
-$('#toolkitRepo').addEventListener('change', (e) => api.saveSettings({ toolkitRepo: (e.target as HTMLInputElement).value.trim() }));
+$('#toolkitRepo').addEventListener('change', async (e) => { teams = await api.setTeamRepo(active, (e.target as HTMLInputElement).value.trim()); });
 $('#cloneToolkit').addEventListener('click', async () => {
-  await api.saveSettings({ toolkitRepo: ($('#toolkitRepo') as HTMLInputElement).value.trim() });
-  await api.cloneToolkit();
+  teams = await api.setTeamRepo(active, ($('#toolkitRepo') as HTMLInputElement).value.trim());
+  await api.cloneToolkit(active);
 });
 let toolkitBusy = false;
 let toolkitProblem: string | null = null;
+const toolkitState = new Map<TeamId, { busy: boolean; ok?: boolean; message: string }>();
 api.onToolkit((t) => {
-  toolkitBusy = t.busy;
-  const m = $('#toolkitMsg');
-  m.textContent = t.message;
-  m.className = `muted small ${t.busy ? '' : t.ok ? 'ok-text' : 'bad-text'}`;
-  toolkitProblem = !t.busy && t.ok === false ? t.message : null;
-  if (!t.busy && t.ok) void loadBoard();
-  void updateBanner(undefined, t.busy ? t.message : null);
+  const team = t.team ?? MAIN_TEAM;
+  toolkitState.set(team, t);
+  const prefix = teams.length > 1 ? `${teamName(team)}: ` : '';
+  if (team === active) {
+    const m = $('#toolkitMsg');
+    m.textContent = t.message;
+    m.className = `muted small ${t.busy ? '' : t.ok ? 'ok-text' : 'bad-text'}`;
+  }
+  toolkitBusy = [...toolkitState.values()].some((x) => x.busy);
+  const bad = [...toolkitState.entries()].find(([, x]) => !x.busy && x.ok === false);
+  toolkitProblem = bad ? `${teams.length > 1 ? `${teamName(bad[0])}: ` : ''}${bad[1].message}` : null;
+  if (!t.busy && t.ok) void loadBoard(team);
+  renderTeams();
+  void updateBanner(undefined, t.busy ? prefix + t.message : null);
 });
 $('#publisherModel').addEventListener('change', (e) => api.saveSettings({ publisherModel: (e.target as HTMLSelectElement).value }));
 $('#ytMode').addEventListener('change', (e) => api.saveSettings({ youtubeMode: (e.target as HTMLSelectElement).value as 'private' | 'scheduled' }));
@@ -411,7 +436,7 @@ async function showPublishing() {
   $('#pubManual').hidden = s.publishVia !== 'manual';
   $('#pubSchedule').hidden = s.publishVia === 'manual';
   if (s.publishVia === 'youtube') {
-    const y = await api.youtubeStatus();
+    const y = await api.youtubeStatus(active);
     ($('#ytSignIn') as HTMLButtonElement).textContent = y.signedIn ? '2. Signed in ✓ (sign in again)' : '2. Sign in to YouTube';
     ($('#ytSecret') as HTMLButtonElement).textContent = y.hasClientSecret ? '1. client_secret.json ✓ (replace)' : '1. Choose client_secret.json…';
   }
@@ -426,7 +451,7 @@ async function showPublishing() {
     sel.options[0].textContent = s.bufferChannelName || s.bufferChannelId;
   }
   sel.value = s.bufferChannelId;
-  const p = await api.publishingStatus();
+  const p = await api.publishingStatus(active);
   if (s.publishVia !== 'buffer') {
     $('#pubState').textContent = s.publishVia === 'manual' ? '· you post' : p.missing ? '· not ready' : '· ready ✓';
     if (p.missing) pubMsg({ ok: false, message: `Still needed: ${p.missing}` });
@@ -461,7 +486,7 @@ $('#publishVia').addEventListener('change', async (e) => {
   pubMsg({ ok: true, message: '' });
   void showPublishing();
 });
-$('#ytSecret').addEventListener('click', async () => { pubMsg(await api.chooseClientSecret()); void showPublishing(); });
+$('#ytSecret').addEventListener('click', async () => { pubMsg(await api.chooseClientSecret(active)); void showPublishing(); });
 const ytLines: string[] = [];
 api.onYouTubeLog((l) => {
   ytLines.push(l);
@@ -474,7 +499,7 @@ api.onYouTubeLog((l) => {
 $('#ytSignIn').addEventListener('click', async () => {
   ytLines.length = 0;
   pubMsg({ ok: true, message: 'Signing in… finish it in the browser window.' });
-  pubMsg(await api.signInYouTube());
+  pubMsg(await api.signInYouTube(active));
   void showPublishing();
 });
 $('#saveBufferKey').addEventListener('click', async () => {
@@ -520,7 +545,7 @@ $('#setupRender').addEventListener('click', async () => {
   await api.setupRendering();
   ($('#setupRender') as HTMLButtonElement).disabled = false;
 });
-$('#openOutput').addEventListener('click', () => void api.openOutputFolder());
+$('#openOutput').addEventListener('click', () => void api.openOutputFolder(active));
 $('#openLog').addEventListener('click', () => void api.openSetupLog());
 const setupLines: string[] = [];
 api.onSetup((p) => {
@@ -539,7 +564,7 @@ api.onSetup((p) => {
   if (!p.busy && p.ok) $('#renderState').textContent = '· set up ✓';
   void updateBanner(undefined, p.busy ? `Setting up rendering: ${p.activity}…` : null);
 });
-api.onBoardChanged(() => void loadBoard());
+api.onBoardChanged((team) => void loadBoard(team || undefined));
 
 // ---------------- self-update from GitHub
 function showUpdate(u: UpdateInfo) {
@@ -595,13 +620,19 @@ $('#recheck').addEventListener('click', async () => {
 
 // ---------------- pipeline board
 let boardRows: ShortRow[] = [];
-async function loadBoard() {
-  boardRows = await api.listShorts();
-  office.setBoard(boardRows);
-  // the review screen in the office plays the newest rendered Short
-  const latest = boardRows.find((r) => r.file);
-  office.setReviewVideo(latest?.file ? await api.fileUrl(latest.file, 'video') : null);
-  if (!$('#review').hidden) renderReviewList();
+/** Refresh one team's board (or all of them). */
+async function loadBoard(team?: TeamId) {
+  for (const t of team ? [team] : teams.map((x) => x.id)) {
+    const rows = await api.listShorts(t);
+    office.setBoard(t, rows);
+    // each line's review screen plays its newest rendered Short
+    const latest = rows.find((r) => r.file);
+    office.setReviewVideo(t, latest?.file ? await api.fileUrl(t, latest.file, 'video') : null);
+    if (t === active) {
+      boardRows = rows;
+      if (!$('#review').hidden) renderReviewList();
+    }
+  }
 }
 
 // ---------------- review screen
@@ -633,7 +664,7 @@ function renderReviewList() {
 async function showReview(id: string) {
   reviewing = id;
   renderReviewList();
-  const info = await api.getReview(id);
+  const info = await api.getReview(active, id);
   const v = $('#reviewVideo') as HTMLVideoElement;
   v.hidden = !info.videoUrl;
   $('#noVideo').hidden = !!info.videoUrl;
@@ -671,7 +702,8 @@ async function showReview(id: string) {
 async function openReview() {
   $('#review').hidden = false;
   office.inputEnabled = false;
-  boardRows = await api.listShorts();
+  boardRows = await api.listShorts(active);
+  $('#reviewTitle').textContent = teams.length > 1 ? `Review screen · ${teamName(active)}` : 'Review screen';
   renderReviewList();
   const first = boardRows.find((r) => r.file) ?? boardRows[0];
   if (first) await showReview(reviewing && boardRows.some((r) => r.id === reviewing) ? reviewing : first.id);
@@ -681,7 +713,7 @@ function closeReview() {
   ($('#reviewVideo') as HTMLVideoElement).pause();
   office.inputEnabled = !open;
 }
-office.onScreen = () => void openReview();
+office.onScreen = (team) => { setActive(team); void openReview(); };
 $('#reviewBtn').addEventListener('click', () => void openReview());
 $('#closeReview').addEventListener('click', closeReview);
 $('#review').addEventListener('click', (e) => { if (e.target === $('#review')) closeReview(); });
@@ -689,7 +721,7 @@ async function decide(approve: boolean) {
   if (!reviewing) return;
   const notes = ($('#reviewNotes') as HTMLTextAreaElement).value;
   $('#reviewMsg').textContent = 'Saving…';
-  const r = await api.decideReview(reviewing, approve, notes);
+  const r = await api.decideReview(active, reviewing, approve, notes);
   $('#reviewMsg').textContent = r.message;
   if (r.ok) ($('#reviewNotes') as HTMLTextAreaElement).value = '';
   await loadBoard();
@@ -698,30 +730,33 @@ async function decide(approve: boolean) {
 $('#markPosted').addEventListener('click', async () => {
   if (!reviewing) return;
   const v = ($('#postedAt') as HTMLInputElement).value;
-  $('#reviewMsg').textContent = await api.markPosted(reviewing, v ? new Date(v).toISOString() : null);
+  $('#reviewMsg').textContent = await api.markPosted(active, reviewing, v ? new Date(v).toISOString() : null);
   await loadBoard();
   await showReview(reviewing);
 });
 $('#unmarkPosted').addEventListener('click', async () => {
   if (!reviewing) return;
-  $('#reviewMsg').textContent = await api.unmarkPosted(reviewing);
+  $('#reviewMsg').textContent = await api.unmarkPosted(active, reviewing);
   await loadBoard();
   await showReview(reviewing);
 });
 $('#uploadBtn').addEventListener('click', async () => {
   if (!reviewing) return;
-  const r = await api.uploadNow(reviewing);
+  const r = await api.uploadNow(active, reviewing);
   $('#reviewMsg').textContent = r.message;
   await showReview(reviewing);
 });
 $('#sendOnBtn').addEventListener('click', async () => {
   if (!reviewing) return;
-  $('#reviewMsg').textContent = await api.sendOn(reviewing);
+  $('#reviewMsg').textContent = await api.sendOn(active, reviewing);
   await showReview(reviewing);
 });
 let blockedMsg: string | null = null;
-api.onPipelineBlocked((m) => {
-  blockedMsg = m || null;
+const blocked = new Map<TeamId, string>();
+api.onPipelineBlocked(({ team, message }) => {
+  if (message) blocked.set(team, message); else blocked.delete(team);
+  const first = [...blocked.entries()][0];
+  blockedMsg = first ? `${teams.length > 1 ? `${teamName(first[0])}: ` : ''}${first[1]}` : null;
   void updateBanner();
 });
 $('#approveBtn').addEventListener('click', () => void decide(true));
@@ -729,12 +764,108 @@ $('#changesBtn').addEventListener('click', () => void decide(false));
 
 // ---------------- start
 (async () => {
-  agents = await api.getAgents();
-  agents.forEach(refreshAgent);
+  // brand fonts must be ready before the office paints its signs and boards
+  try { await Promise.all(['800 40px "Bricolage Grotesque"', '700 40px "Bricolage Grotesque"', '400 20px "DM Sans"', '600 20px "DM Sans"', '700 20px "DM Sans"'].map((f) => document.fonts.load(f))); } catch { /* fall back to system fonts */ }
+  await applyTeams(await api.listTeams());
   showMode('topdown'); // always start in the Sims-style view
   showAutopilot((await api.getSettings()).autopilot);
   $('#appVersion').textContent = 'v' + (await api.appVersion());
   await loadBoard();
-  setInterval(loadBoard, 20000);
+  setInterval(() => void loadBoard(), 20000);
   void updateBanner();
 })();
+
+// ---------------- teams
+function setActive(team: TeamId) {
+  if (!teams.some((t) => t.id === team)) team = MAIN_TEAM;
+  const changed = team !== active;
+  active = team;
+  const i = Math.max(0, teams.findIndex((t) => t.id === team));
+  const chip = $('#teamBtn');
+  chip.hidden = false;
+  chip.querySelector('b')!.textContent = teamName(team);
+  chip.style.setProperty('--team', TEAM_ACCENTS[i % TEAM_ACCENTS.length]);
+  const sw = teamAgents(team).find((a) => a.id === 'script-writer');
+  ($('#runToday') as HTMLButtonElement).disabled = !!sw && (sw.status === 'working' || sw.status === 'needs-you');
+  ($('#runToday') as HTMLButtonElement).title = `Scripty${teams.length > 1 ? ` (${teamName(team)})` : ''} makes today's Short from start to finish`;
+  if (changed) {
+    reviewing = null;
+    void api.listShorts(team).then((r) => (boardRows = r));
+  }
+}
+async function applyTeams(list: TeamConfig[]) {
+  teams = list;
+  office.setTeams(teams.map((t) => ({ id: t.id, name: t.name })));
+  for (const t of teams) {
+    const a = await api.getAgents(t.id);
+    agentsBy.set(t.id, a);
+    a.forEach((x) => refreshAgent(t.id, x));
+  }
+  for (const k of [...agentsBy.keys()]) if (!teams.some((t) => t.id === k)) agentsBy.delete(k);
+  if (open && !teams.some((t) => t.id === open!.team)) closeChat();
+  setActive(teams.some((t) => t.id === active) ? active : MAIN_TEAM);
+  renderTeams();
+  void loadBoard();
+}
+api.onTeams((t) => void applyTeams(t));
+
+function teamStatus(t: TeamId): string {
+  const ts = toolkitState.get(t);
+  if (ts?.busy) return ts.message;
+  if (ts && ts.ok === false) return ts.message;
+  const a = teamAgents(t);
+  const working = a.filter((x) => x.status === 'working' || x.status === 'needs-you').map((x) => x.name);
+  return working.length ? `Working: ${working.join(', ')}` : 'All four desks idle';
+}
+function renderTeams() {
+  const box = $('#teamList');
+  if (!box) return;
+  box.innerHTML = '';
+  teams.forEach((t, i) => {
+    const row = document.createElement('div');
+    row.className = 'team-row' + (t.id === active ? ' on' : '');
+    row.style.setProperty('--team', TEAM_ACCENTS[i % TEAM_ACCENTS.length]);
+    row.innerHTML = `<span class="swatch"></span><div class="team-fields"><input class="tname" aria-label="Team name" /><div class="field"><input class="trepo" aria-label="Toolkit repo" placeholder="owner/repo" /></div><div class="muted small tstat"></div></div><div class="team-btns"><button class="ghost go">Go there</button><button class="ghost rm">Remove</button></div>`;
+    const name = row.querySelector('.tname') as HTMLInputElement;
+    name.value = t.name;
+    name.onchange = async () => void applyTeams(await api.renameTeam(t.id, name.value));
+    const repo = row.querySelector('.trepo') as HTMLInputElement;
+    repo.value = t.toolkitRepo;
+    repo.onchange = async () => { teams = await api.setTeamRepo(t.id, repo.value); await api.cloneToolkit(t.id); };
+    row.querySelector('.tstat')!.textContent = `${teamStatus(t.id)} · ${t.toolkitPath}`;
+    (row.querySelector('.go') as HTMLButtonElement).onclick = () => { setActive(t.id); office.focusTeam(t.id); closeTeams(); };
+    const rm = row.querySelector('.rm') as HTMLButtonElement;
+    rm.hidden = t.id === MAIN_TEAM;
+    rm.onclick = async () => {
+      if (!confirm(`Remove ${t.name}? Their desks stop and leave the studio. Their toolkit folder and Shorts stay on this PC and on GitHub.`)) return;
+      const r = await api.removeTeam(t.id);
+      teamMsg(r);
+    };
+    box.appendChild(row);
+  });
+  ($('#addTeamBtn') as HTMLButtonElement).disabled = teams.length >= 4;
+  $('#teamCount').textContent = `${teams.length} of 4`;
+}
+const teamMsg = (r: { ok: boolean; message: string }) => {
+  const m = $('#teamMsg');
+  m.textContent = r.message;
+  m.className = `muted small ${r.ok ? 'ok-text' : 'bad-text'}`;
+};
+function openTeams() {
+  renderTeams();
+  $('#teams').hidden = false;
+  office.inputEnabled = false;
+}
+function closeTeams() {
+  $('#teams').hidden = true;
+  office.inputEnabled = !open;
+}
+$('#teamBtn').addEventListener('click', openTeams);
+$('#closeTeams').addEventListener('click', closeTeams);
+$('#teams').addEventListener('click', (e) => { if (e.target === $('#teams')) closeTeams(); });
+$('#addTeamBtn').addEventListener('click', async () => {
+  const n = $('#newTeamName') as HTMLInputElement, r = $('#newTeamRepo') as HTMLInputElement;
+  const res = await api.addTeam(n.value, r.value);
+  teamMsg(res);
+  if (res.ok) { n.value = ''; r.value = ''; }
+});
