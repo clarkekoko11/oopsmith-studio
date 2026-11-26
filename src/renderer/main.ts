@@ -335,6 +335,7 @@ async function openSettings() {
   ($('#ytTz') as HTMLSelectElement).value = s.audienceTimezone;
   renderTimes(s.postingTimes);
   ($('#ytAuto') as HTMLInputElement).checked = s.youtubeAutoUpload;
+  renderEffort(s.effort);
   void showPublishing();
   $('#renderState').textContent = s.renderReady ? '· set up ✓' : '· not set up yet';
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
@@ -774,6 +775,32 @@ $('#changesBtn').addEventListener('click', () => void decide(false));
   setInterval(() => void loadBoard(), 20000);
   void updateBanner();
 })();
+
+// ---------------- thinking effort per desk
+function renderEffort(e: Record<AgentId, string> | undefined) {
+  const box = $('#effortBox');
+  box.innerHTML = '';
+  const labels: Record<AgentId, string> = { 'script-writer': 'Scripty (scripts)', editor: 'Cutter (editor)', reviewer: 'Hawk (reviewer)', publisher: 'Pip (publisher)' };
+  const defaults: Record<AgentId, string> = { 'script-writer': 'high', editor: 'high', reviewer: 'medium', publisher: 'low' };
+  for (const id of Object.keys(labels) as AgentId[]) {
+    const l = document.createElement('label');
+    l.textContent = labels[id];
+    const sel = document.createElement('select');
+    for (const [v, t] of [['low', 'Low (cheapest)'], ['medium', 'Medium'], ['high', 'High'], ['xhigh', 'Extra high'], ['max', 'Max (most tokens)']]) {
+      const o = document.createElement('option');
+      o.value = v;
+      o.textContent = t;
+      sel.appendChild(o);
+    }
+    sel.value = e?.[id] ?? defaults[id];
+    sel.onchange = async () => {
+      const cur = (await api.getSettings()).effort ?? defaults;
+      await api.saveSettings({ effort: { ...cur, [id]: sel.value } as typeof cur });
+    };
+    l.appendChild(sel);
+    box.appendChild(l);
+  }
+}
 
 // ---------------- teams
 function setActive(team: TeamId) {

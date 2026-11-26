@@ -173,6 +173,17 @@ src/renderer/    the 3D office (Three.js) and UI
 resources/       bundled copy of viral-short-script.md (the toolkit's copy wins if present)
 ```
 
+## Token saving (works with Opus on every desk)
+- Each desk only gets the tools it uses (Scripty: shell, files, search, web; Cutter: shell + files; Hawk and Pip
+  fewer), so fewer tool descriptions are re-sent on every step.
+- Cutter builds a new Short in **two fresh conversations**: part 1 plans and builds, then writes
+  `shorts/<ID>/handoff.md`; part 2 starts clean from that note for the still checks, sound, captions and ready.
+  Part 2 never re-reads the whole build chat.
+- Long command output is capped at 8k characters (the rest goes to a file the agent can open), and long jobs
+  compact at 120k tokens instead of growing to the full window.
+- **Settings → Thinking effort** per desk (defaults: Scripty high, Cutter high, Hawk medium, Pip low).
+- Compare before/after on the review screen's token table: it shows tokens per desk for every Short.
+
 ## Current limits
 - Models default to Sonnet for every desk (Settings to change). Each job has a step cap so a stuck agent can't burn your plan.
 - One Short moves through the pipeline at a time. Building a Short uses a lot of Claude usage (many steps and still checks); on Pro, expect roughly one Short a day.

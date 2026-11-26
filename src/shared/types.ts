@@ -15,6 +15,9 @@ export interface TeamConfig {
   toolkitPath: string;
 }
 
+/** How hard each agent thinks (Opus adaptive thinking). Lower = fewer tokens. */
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+
 export type AgentStatus = 'idle' | 'working' | 'needs-you' | 'offline' | 'error';
 
 export interface AgentInfo {
@@ -108,6 +111,8 @@ export interface Settings {
   audienceTimezone: string;
   /** best posting time per weekday (HH:MM in audienceTimezone); one Short per day */
   postingTimes: Record<'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat', string>;
+  /** thinking effort per desk */
+  effort: Record<AgentId, Effort>;
   /** name of the main team (its repo and folder are toolkitRepo / toolkitPath above) */
   mainTeamName: string;
   /** extra teams; each runs its own line of four agents in parallel */

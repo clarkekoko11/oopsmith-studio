@@ -3,7 +3,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentId, TeamId } from '../shared/types';
-import { editorFixKickoff, editorKickoff, editorRevisionKickoff, publisherKickoff, reviewerKickoff, AUTOPILOT_TAG } from './agentDefs';
+import { editorFixKickoff, editorKickoff, editorPart2Kickoff, editorRevisionKickoff, publisherKickoff, reviewerKickoff, AUTOPILOT_TAG } from './agentDefs';
 import { commitAndPush } from './git';
 import { createShortPost, postStatus } from './buffer';
 import { checkPublic, hostVideo } from './media';
@@ -191,8 +191,14 @@ export class Pipeline {
       await this.agents.send(editor, editorRevisionKickoff(changes, who === 'You'), `${who} asked for changes on ${changes}`, { fresh: true, short: changes });
       return;
     }
-    // 4. a build that stopped part-way: continue it once
-    const stuck = by('building').find((id) => this.attempt('continue', id, 1));
+    // 4. part 1 is done (handoff note written): part 2 in a fresh conversation
+    const part2 = by('building').find((id) => existsSync(join(s.toolkitPath, 'shorts', id, 'handoff.md')) && this.attempt('part2', id, 2));
+    if (part2) {
+      await this.agents.send(editor, editorPart2Kickoff(part2), `Part 2 for ${part2}: checks, sound, captions`, { fresh: true, short: part2 });
+      return;
+    }
+    // 5. a build that stopped part-way: continue it once
+    const stuck = by('building').find((id) => !existsSync(join(s.toolkitPath, 'shorts', id, 'handoff.md')) && this.attempt('continue', id, 1));
     if (stuck) {
       await this.agents.send(editor, `${AUTOPILOT_TAG} Continue building ${stuck} where you left off (check what already exists in the repo first) and get it ready to render, without asking me anything.`, `Continue ${stuck}`, { fresh: true, short: stuck });
       return;

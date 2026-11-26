@@ -16,7 +16,7 @@ export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 export const LIVE_PHASE = 4;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 9;
+export const PROMPT_VERSION = 10;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 
@@ -25,7 +25,11 @@ export const DAILY_KICKOFF = `${AUTOPILOT_TAG} Make today's Short from start to 
 
 /** Hand-off from Scripty to Cutter. */
 export const editorKickoff = (id: string) =>
-  `${AUTOPILOT_TAG} ${id} has an approved script and voiceover. Build it and get it ready to render, without asking me anything.`;
+  `${AUTOPILOT_TAG} ${id} has an approved script and voiceover. Do PART 1 (steps 1-4: plan and build the cast, sets and story), write shorts/${id}/handoff.md and stop. Don't ask me anything.`;
+
+/** Cutter's second, fresh conversation: checks, sound, captions, ready. Starts from the handoff note, not the build chat. */
+export const editorPart2Kickoff = (id: string) =>
+  `${AUTOPILOT_TAG} PART 2 for ${id}: read shorts/${id}/handoff.md (it has everything from part 1), then do steps 5-9 (still checks, sound and captions, ready, push). Don't re-read files the handoff already summarises. Don't ask me anything.`;
 
 /** A finished render goes to Hawk. */
 export const reviewerKickoff = (id: string, video: string, version: number) =>
@@ -149,6 +153,14 @@ every ~1.5-2.5 s). From README.md read the coordinate conventions and Lessons; s
 exists. src/stories/lake.js is the worked example: use Grep to find the patterns you need (shot(), keyed(),
 talk(), walkCycle, update()) and read only those parts, not the whole file. This is the skill's prepare-only flow: steps 2-6, then
 mark the Short ready. Skip the skill's step 1 (the app already set the toolkit up) and step 7 (the app renders).
+
+## Two parts, two fresh conversations (saves the user's plan)
+A new Short is built in two separate jobs, so the second one doesn't re-read the whole build:
+- PART 1 = steps 1-4. Finish by writing shorts/<ID>/handoff.md (max ~60 lines): the <name>, duration, the
+  shot list with times, cast and set files and their GLB paths (the full key=... asset list for step 7),
+  caption --fix mis-hearings, anything left to check. Then STOP and reply in 2 lines. Don't run still checks.
+- PART 2 = steps 5-9, started fresh: read handoff.md first and trust it; open the story file only to fix shots.
+Fix and render-failure jobs (below) are single jobs as before.
 
 ## Steps for a Short <ID>
 1. \`${py} tools/shorts.py set <ID> status=building\`, then \`${py} tools/shorts.py name <ID>\` gives <name>.

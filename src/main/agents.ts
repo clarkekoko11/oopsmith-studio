@@ -16,6 +16,15 @@ type UsageEmit = (u: UsageState) => void;
 type TurnEnd = (id: AgentId) => void;
 type NewItem = ChatItem extends infer T ? (T extends ChatItem ? Omit<T, 'id' | 'at'> : never) : never;
 
+/** Each desk only gets the tools it uses: every tool's description is re-sent on every step. */
+const TOOLS: Record<AgentId, string[]> = {
+  'script-writer': ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob', 'WebSearch', 'WebFetch'],
+  editor: ['Bash', 'Read', 'Write', 'Edit', 'Grep', 'Glob'],
+  reviewer: ['Bash', 'Read', 'Write', 'Grep'],
+  publisher: ['Bash', 'Read', 'Write', 'Edit'],
+};
+const DEFAULT_EFFORT = { 'script-writer': 'high', editor: 'high', reviewer: 'medium', publisher: 'low' } as const;
+
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const store = (...p: string[]) => join(app.getPath('userData'), ...p);
 
@@ -176,7 +185,11 @@ class AgentSession {
         model: ({ editor: settings.editorModel, reviewer: settings.reviewerModel, publisher: settings.publisherModel } as Partial<Record<AgentId, string>>)[this.id] ?? settings.scriptWriterModel,
         // a safety cap per job, so a stuck agent can't burn through the plan
         maxTurns: { 'script-writer': 80, editor: 160, reviewer: 50, publisher: 40 }[this.id],
-        systemPrompt: { type: 'preset', preset: 'claude_code', append },
+        systemPrompt: { type: 'preset', preset: 'claude_code', append, excludeDynamicSections: true },
+        tools: TOOLS[this.id],
+        effort: settings.effort?.[this.id] ?? DEFAULT_EFFORT[this.id],
+        // long command output goes to a file (the agent sees a preview + path); long jobs compact early
+        settings: { bashOutputMaxChars: 8000, autoCompactWindow: 120_000 },
         settingSources: [],
         includePartialMessages: true,
         permissionMode: 'default',
