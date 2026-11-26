@@ -46,22 +46,32 @@ The app never sees your Claude password or token.
 - Git signed in to the GitHub account that owns `clarkekoko11/roblox-shorts-toolkit`
 - Your **Gemini API key** (Google AI Studio → Get API key) for voiceovers
 
-## Install and run
+## Install (the easy way)
+1. Open **[Releases](https://github.com/clarkekoko11/oopsmith-studio/releases/latest)** and download
+   `OopsmithStudio-Setup-<version>.exe`.
+2. Run it. It installs for your Windows user only (no admin), and adds Start menu and desktop shortcuts.
+3. The installer isn't code-signed, so Windows SmartScreen may say "Windows protected your PC". Click
+   **More info → Run anyway**. This only happens on the first install.
+
+## Updates
+The app checks GitHub Releases when it starts and every 3 hours, and downloads a new version quietly in the
+background. When it's ready, a green **⬆ Update ready** chip appears in the top bar (also Settings → App
+updates). Click it to install and restart, or just close the app and the update installs then. Settings,
+chats, keys and your Claude login are kept (they live in `%APPDATA%\Oopsmith Studio`).
+
+**Publishing a new version (for the maintainer):** bump `version` in `package.json`, commit, then
+`git tag v0.6.1 && git push --tags`. GitHub Actions builds the installer on Windows and publishes the
+release; every installed copy picks it up.
+
+## Run from source (developers)
 ```powershell
 git clone https://github.com/clarkekoko11/oopsmith-studio.git
 cd oopsmith-studio
 npm install
 npm start
 ```
-Install from GitHub with `git clone` (not a zip) so the app can update itself.
-
-## Updates
-The app checks GitHub when it starts and every 3 hours. When there's a new version, a green
-**⬆ Update ready** chip appears in the top bar (also Settings → App updates). Click it: the app pulls the
-new version, re-installs packages if they changed, rebuilds and restarts. Settings, chats and your Claude
-login are kept (they live in `%APPDATA%\Oopsmith Studio`, not in the app folder).
-Don't edit files in the app folder by hand, or updates will stop until you undo those changes.
-`npm install` downloads Electron and the Claude Code engine for Windows (a few hundred MB, first time only).
+A source clone updates itself with `git pull` instead (same ⬆ chip). Don't edit files in it by hand, or
+updates stop until you undo those changes.
 
 ## First run (about 2 minutes)
 1. **Sign in to Claude:** click the account chip (top left) → **Sign in / switch…**. A terminal opens; type

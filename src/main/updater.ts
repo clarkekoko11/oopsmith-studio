@@ -1,7 +1,10 @@
-// Self-update from GitHub. The app runs from a Git clone of clarkekoko11/oopsmith-studio:
-// on start (and every few hours) it fetches; if new commits exist it offers an update that
-// pulls them, re-installs packages when they changed, rebuilds, and restarts.
+// Self-update from GitHub, two ways:
+// - installed app (the .exe): electron-updater downloads the newest GitHub Release in the background;
+//   "Update and restart" installs it.
+// - running from a Git clone (npm start): fetch; if new commits exist, pull, re-install packages when
+//   they changed, rebuild, and restart.
 import { app } from 'electron';
+import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -40,9 +43,41 @@ function run(cmd: string, args: string[], onLine?: (l: string) => void): Promise
   });
 }
 
-export const isClone = () => existsSync(join(dir(), '.git'));
+export const isClone = () => !app.isPackaged && existsSync(join(dir(), '.git'));
+
+// ---- installed app: GitHub Releases via electron-updater
+type AU = typeof import('electron-updater').autoUpdater;
+let au: AU | undefined;
+let downloaded: { version: string; notes: string[] } | null = null;
+let auError: string | undefined;
+function updater(): AU {
+  if (au) return au;
+  au = (createRequire(import.meta.url)('electron-updater') as typeof import('electron-updater')).autoUpdater;
+  au.autoDownload = true; // download quietly in the background
+  au.autoInstallOnAppQuit = true; // or install the next time the app closes
+  au.on('update-downloaded', (info) => {
+    const notes = typeof info.releaseNotes === 'string' ? info.releaseNotes.replace(/<[^>]+>/g, '').split('\n') : (info.releaseNotes ?? []).map((n) => n.note ?? '');
+    downloaded = { version: info.version, notes: notes.map((n) => n.trim()).filter(Boolean).slice(0, 6) };
+  });
+  au.on('error', (e) => (auError = e.message));
+  return au;
+}
+
+async function checkReleases(): Promise<UpdateState> {
+  auError = undefined;
+  try {
+    await updater().checkForUpdates();
+  } catch (e) {
+    auError = (e as Error).message;
+  }
+  // give a small update a moment to finish downloading
+  for (let i = 0; i < 20 && !downloaded && !auError; i++) await new Promise((r) => setTimeout(r, 500));
+  if (downloaded) return { available: true, behind: 1, changes: [`Version ${downloaded.version}`, ...downloaded.notes], current: app.getVersion() };
+  return { available: true, behind: 0, changes: [], current: app.getVersion(), error: auError ? `Could not check GitHub for updates (${auError.split('\n')[0]}).` : undefined };
+}
 
 export async function checkForUpdate(): Promise<UpdateState> {
+  if (app.isPackaged) return checkReleases();
   if (!isClone()) return { available: false, behind: 0, changes: [] };
   const current = (await run('git', ['rev-parse', '--short', 'HEAD'])).out.trim();
   const f = await run('git', ['fetch', '--quiet', 'origin']);
@@ -57,6 +92,16 @@ export async function checkForUpdate(): Promise<UpdateState> {
 
 /** Pull, install if package files changed, rebuild, restart. Progress goes to onStep. */
 export async function applyUpdate(onStep: (s: string) => void): Promise<{ ok: boolean; message: string }> {
+  if (app.isPackaged) {
+    if (!downloaded) {
+      onStep('downloading the update');
+      await checkReleases();
+      if (!downloaded) return { ok: false, message: auError ?? 'No update downloaded yet.' };
+    }
+    onStep('restarting');
+    setTimeout(() => updater().quitAndInstall(true, true), 600);
+    return { ok: true, message: 'Installing the update and restarting…' };
+  }
   if (!isClone()) return { ok: false, message: 'This copy of the app is not a Git clone, so it cannot update itself.' };
   onStep('downloading the update');
   const before = (await run('git', ['rev-parse', 'HEAD'])).out.trim();

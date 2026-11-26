@@ -1,18 +1,19 @@
 {
   "name": "oopsmith-studio",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "3D agent office for Oopsmith Shorts",
   "main": "dist/main.mjs",
   "scripts": {
     "build": "node scripts/build.mjs",
     "start": "node scripts/build.mjs && electron .",
     "typecheck": "tsc --noEmit -p .",
-    "dist": "node scripts/build.mjs && electron-builder --win"
+    "dist": "node scripts/build.mjs && electron-builder --win --x64",
+    "release": "node scripts/build.mjs && electron-builder --win --x64 --publish always"
   },
   "license": "ISC",
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.3.332",
-    "three": "^0.187.0"
+    "electron-updater": "^6.8.11"
   },
   "devDependencies": {
     "@types/node": "^26.6.10",
@@ -20,7 +21,8 @@
     "electron": "^45.5.0",
     "electron-builder": "^26.18.0",
     "esbuild": "^0.28.2",
-    "typescript": "^7.0.2"
+    "typescript": "^7.0.2",
+    "three": "^0.187.0"
   },
   "productName": "Oopsmith Studio",
   "type": "commonjs",
@@ -29,21 +31,56 @@
     "productName": "Oopsmith Studio",
     "files": [
       "dist/**",
+      "!dist/**/*.map",
       "resources/**",
-      "package.json"
+      "package.json",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-linux*/**",
+      "!node_modules/@anthropic-ai/claude-agent-sdk-darwin*/**"
     ],
     "asarUnpack": [
       "node_modules/@anthropic-ai/**",
       "resources/**"
     ],
     "win": {
-      "target": "nsis"
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "OopsmithStudio-Setup-${version}.${ext}"
     },
     "directories": {
-      "output": "release"
-    }
+      "output": "release",
+      "buildResources": "build"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowElevation": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Oopsmith Studio",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "clarkekoko11",
+        "repo": "oopsmith-studio",
+        "releaseType": "release"
+      }
+    ]
   },
   "engines": {
     "node": ">=20"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/clarkekoko11/oopsmith-studio.git"
+  },
+  "author": "Oopsmith"
 }

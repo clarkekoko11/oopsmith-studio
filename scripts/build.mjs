@@ -16,7 +16,7 @@ await Promise.all([
     platform: 'node',
     format: 'esm',
     target: 'node22',
-    external: ['electron', '@anthropic-ai/claude-agent-sdk'],
+    external: ['electron', '@anthropic-ai/claude-agent-sdk', 'electron-updater'],
     banner: { js: "import { createRequire as __cr } from 'module'; const require = __cr(import.meta.url);" },
     sourcemap: true,
   }),
