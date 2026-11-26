@@ -6,11 +6,12 @@ import type { AgentId } from '../shared/types';
 import { editorFixKickoff, editorKickoff, editorRevisionKickoff, publisherKickoff, reviewerKickoff, AUTOPILOT_TAG } from './agentDefs';
 import { commitAndPush } from './git';
 import { uploadBusy, uploadShort, youtubeStatus } from './youtube';
+import { dayKey, describeSlot, nextSlot } from './schedule';
 import type { AgentManager } from './agents';
 import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
 
-type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; file?: string; version?: number; youtube_id?: string }> };
+type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; file?: string; version?: number; youtube_id?: string; publish_at?: string }> };
 
 export class Pipeline {
   private tries = new Map<string, number>(); // `${kind}:${id}` -> attempts this session
@@ -75,7 +76,7 @@ export class Pipeline {
     const st = m.status ?? '';
     const busy = (a: AgentId) => this.agents.currentWork(a);
     if (this.why.has(id)) return this.why.get(id)!;
-    if (/^(uploaded|published)/.test(st)) return st === 'uploaded_scheduled' ? 'Uploaded to YouTube, scheduled to go public.' : 'Uploaded to YouTube as private: publish it in YouTube Studio when you like.';
+    if (/^(uploaded|published)/.test(st)) return st === 'uploaded_scheduled' && m.publish_at ? `On YouTube, goes public ${describeSlot(Date.parse(m.publish_at), s.audienceTimezone)}.` : 'Uploaded to YouTube as private: publish it in YouTube Studio when you like.';
     if (uploadBusy() && busy('publisher') === id) return 'Uploading to YouTube…';
     if (busy('publisher') === id) return 'Pip is writing the upload details.';
     if (st === 'approved') return this.agents.isIdle('publisher') ? 'Next in line for Pip (upload details).' : `Waiting for Pip (busy with ${busy('publisher') ?? 'another Short'}).`;
@@ -193,16 +194,28 @@ export class Pipeline {
       await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=approved']);
       return;
     }
-    const when = s.youtubeMode === 'scheduled' ? `scheduled for ${s.youtubeHour}:00 tomorrow` : 'private';
+    // one Short per day: the next free day, at that weekday's best time for the audience
+    let publishAt: string | null = null;
+    let when = 'private';
+    if (s.youtubeMode === 'scheduled') {
+      const taken = new Set(
+        Object.values(reg!.shorts)
+          .filter((x) => x.publish_at && x.id !== id)
+          .map((x) => dayKey(Date.parse(x.publish_at!), s.audienceTimezone)),
+      );
+      const at = nextSlot(s.audienceTimezone, s.postingTimes, taken);
+      publishAt = new Date(at).toISOString();
+      when = `goes public ${describeSlot(at, s.audienceTimezone)}`;
+    }
     this.agents.post(publisher, { kind: 'notice', text: `Uploading ${id} to YouTube (${when})…` });
     this.agents.setExternal(publisher, `${id} · uploading`);
     this.agents.setCurrentShort(publisher, id);
-    const r = await uploadShort(s.pythonCommand, s.toolkitPath, this.uploadHelper, video, meta, s.youtubeMode, s.youtubeHour, () => {});
+    const r = await uploadShort(s.pythonCommand, s.toolkitPath, this.uploadHelper, video, meta, s.youtubeMode, publishAt, () => {});
     this.agents.setExternal(publisher, undefined);
     this.uploadNow.delete(id);
     if (r.ok && r.videoId) {
       const status = s.youtubeMode === 'scheduled' ? 'uploaded_scheduled' : 'uploaded_private';
-      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, `status=${status}`, `youtube_id=${r.videoId}`]);
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, `status=${status}`, `youtube_id=${r.videoId}`, ...(publishAt ? [`publish_at=${publishAt}`] : [])]);
       await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${id}: uploaded to YouTube (${s.youtubeMode})`);
       this.agents.post(publisher, {
         kind: 'agent',

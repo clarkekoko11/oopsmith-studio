@@ -131,19 +131,30 @@
 
       <section>
         <h3>YouTube <span class="muted small" id="ytState"></span></h3>
-        <p class="muted small">Pip uploads approved Shorts with your toolkit's uploader: <b>private</b> (you press publish in YouTube Studio) or <b>scheduled</b> for an hour the next day. Never public straight away. One-time setup (AUTOMATION.md step 4): in Google Cloud Console enable "YouTube Data API v3", create an OAuth client of type <b>Desktop app</b> and download its JSON.</p>
+        <p class="muted small">Pip uploads approved Shorts with your toolkit's sign-in: <b>scheduled</b> (one Short a day, goes public at that day's best time) or <b>private</b> (you press publish in YouTube Studio). Never public straight away. One-time setup (AUTOMATION.md step 4): in Google Cloud Console enable "YouTube Data API v3", create an OAuth client of type <b>Desktop app</b> and download its JSON.</p>
         <div class="field"><button class="ghost" id="ytSecret">1. Choose client_secret.json…</button><button class="ghost" id="ytSignIn">2. Sign in to YouTube</button></div>
         <div class="two">
           <label>After approval
             <select id="ytMode">
-              <option value="private">Upload as private</option>
-              <option value="scheduled">Upload scheduled (goes public at…)</option>
+              <option value="scheduled">Schedule: one Short a day at the best time</option>
+              <option value="private">Upload as private (I publish myself)</option>
             </select>
           </label>
-          <label>Scheduled hour (next day)
-            <input id="ytHour" type="number" min="0" max="23" />
+          <label>Main audience time zone
+            <select id="ytTz">
+              <option value="America/New_York">US Eastern (New York)</option>
+              <option value="America/Chicago">US Central (Chicago)</option>
+              <option value="America/Los_Angeles">US Pacific (Los Angeles)</option>
+              <option value="Europe/London">UK (London)</option>
+              <option value="Asia/Manila">Philippines (Manila)</option>
+              <option value="Asia/Kolkata">India (Kolkata)</option>
+              <option value="Australia/Sydney">Australia (Sydney)</option>
+            </select>
           </label>
         </div>
+        <p class="muted small">Posting time per day, in the audience's time zone. Defaults come from Buffer's and SocialPilot's 2026 studies (Shorts do best late afternoon/evening; Friday is strongest). Check YouTube Studio → Analytics → Audience → "When your viewers are on YouTube" after a few weeks and adjust.</p>
+        <div class="times" id="ytTimes"></div>
+        <div class="field"><button class="ghost" id="ytResetTimes">Reset to researched times</button><span class="muted small" id="ytNext"></span></div>
         <label class="small"><input type="checkbox" id="ytAuto" /> Upload automatically after Hawk approves (otherwise press Upload on the review screen)</label>
         <p class="muted small" id="ytMsg"></p>
         <pre id="ytLog" hidden></pre>

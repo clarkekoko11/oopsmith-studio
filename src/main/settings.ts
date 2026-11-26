@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync, unlinkSync } from '
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { Settings } from '../shared/types';
+import { RESEARCHED_TIMES } from './schedule';
 
 const dir = () => app.getPath('userData');
 const settingsFile = () => join(dir(), 'settings.json');
@@ -28,8 +29,10 @@ function defaults(): Stored {
     renderReady: false,
     publisherModel: 'sonnet',
     youtubeAutoUpload: true,
-    youtubeMode: 'private',
+    youtubeMode: 'scheduled',
     youtubeHour: 18,
+    audienceTimezone: 'America/New_York',
+    postingTimes: { ...RESEARCHED_TIMES },
   };
 }
 

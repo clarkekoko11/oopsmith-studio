@@ -4,7 +4,7 @@ import type { AgentEvent, AgentId, AgentInfo, ChatItem, Settings, StudioApi } fr
 export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
   const hist: Record<string, ChatItem[]> = { 'script-writer': [] };
-  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: 'sonnet', editorModel: 'sonnet', reviewerModel: 'sonnet', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false, publisherModel: 'sonnet', youtubeAutoUpload: true, youtubeMode: 'private', youtubeHour: 18 };
+  let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: 'sonnet', editorModel: 'sonnet', reviewerModel: 'sonnet', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false, publisherModel: 'sonnet', youtubeAutoUpload: true, youtubeMode: 'scheduled', youtubeHour: 18, audienceTimezone: 'America/New_York', postingTimes: { mon: '18:00', tue: '19:00', wed: '18:00', thu: '19:00', fri: '16:00', sat: '18:00', sun: '17:00' } };
   const agents: AgentInfo[] = [
     { id: 'script-writer', name: 'Scripty', role: 'Script Writer', phase: 1, status: 'idle' },
     { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'working', activity: 'RS-0003 · rendering frames 42%' },

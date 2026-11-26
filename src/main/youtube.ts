@@ -82,7 +82,7 @@ export async function uploadShort(
   video: string,
   metaFile: string,
   mode: 'private' | 'scheduled',
-  hour: number,
+  publishAt: string | null,
   log: (l: string) => void,
 ): Promise<{ ok: boolean; videoId?: string; message: string }> {
   if (uploading) return { ok: false, message: 'Another upload is running.' };
@@ -92,7 +92,7 @@ export async function uploadShort(
   let id: string | undefined;
   const tail: string[] = [];
   try {
-    const code = await py(python, toolkit, [helper, toolkit, video, metaFile, mode, mode === 'scheduled' ? String(hour) : 'none'], (l) => {
+    const code = await py(python, toolkit, [helper, toolkit, video, metaFile, mode, mode === 'scheduled' && publishAt ? publishAt : 'none'], (l) => {
       tail.push(l);
       if (tail.length > 12) tail.shift();
       const m = /^VIDEO_ID\s+(\S+)/.exec(l);

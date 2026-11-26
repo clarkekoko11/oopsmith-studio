@@ -75,6 +75,10 @@ export interface Settings {
   /** private: you publish in YouTube Studio; scheduled: goes public at youtubeHour the next day */
   youtubeMode: 'private' | 'scheduled';
   youtubeHour: number;
+  /** IANA time zone of the main audience; posting times are in this zone */
+  audienceTimezone: string;
+  /** best posting time per weekday (HH:MM in audienceTimezone); one Short per day */
+  postingTimes: Record<'sun' | 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat', string>;
 }
 
 export interface UpdateInfo {

@@ -315,7 +315,8 @@ async function openSettings() {
   ($('#reviewerModel') as HTMLSelectElement).value = s.reviewerModel;
   ($('#publisherModel') as HTMLSelectElement).value = s.publisherModel;
   ($('#ytMode') as HTMLSelectElement).value = s.youtubeMode;
-  ($('#ytHour') as HTMLInputElement).value = String(s.youtubeHour);
+  ($('#ytTz') as HTMLSelectElement).value = s.audienceTimezone;
+  renderTimes(s.postingTimes);
   ($('#ytAuto') as HTMLInputElement).checked = s.youtubeAutoUpload;
   void showYouTube();
   $('#renderState').textContent = s.renderReady ? '· set up ✓' : '· not set up yet';
@@ -362,7 +363,38 @@ api.onToolkit((t) => {
 });
 $('#publisherModel').addEventListener('change', (e) => api.saveSettings({ publisherModel: (e.target as HTMLSelectElement).value }));
 $('#ytMode').addEventListener('change', (e) => api.saveSettings({ youtubeMode: (e.target as HTMLSelectElement).value as 'private' | 'scheduled' }));
-$('#ytHour').addEventListener('change', (e) => api.saveSettings({ youtubeHour: Math.min(23, Math.max(0, Number((e.target as HTMLInputElement).value) || 18)) }));
+$('#ytTz').addEventListener('change', async (e) => { await api.saveSettings({ audienceTimezone: (e.target as HTMLSelectElement).value }); showNextSlots(); });
+const DAY_ORDER = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+const RESEARCHED = { mon: '18:00', tue: '19:00', wed: '18:00', thu: '19:00', fri: '16:00', sat: '18:00', sun: '17:00' };
+function renderTimes(t: Record<string, string>) {
+  const box = $('#ytTimes');
+  box.innerHTML = '';
+  for (const d of DAY_ORDER) {
+    const l = document.createElement('label');
+    l.textContent = d;
+    const i = document.createElement('input');
+    i.type = 'time';
+    i.value = t[d] ?? RESEARCHED[d];
+    i.onchange = async () => {
+      const s = await api.getSettings();
+      await api.saveSettings({ postingTimes: { ...s.postingTimes, [d]: i.value || RESEARCHED[d] } });
+      showNextSlots();
+    };
+    l.appendChild(i);
+    box.appendChild(l);
+  }
+  showNextSlots();
+}
+async function showNextSlots() {
+  const s = await api.getSettings();
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: s.audienceTimezone, weekday: 'short' }).format(new Date()).toLowerCase().slice(0, 3) as keyof typeof s.postingTimes;
+  const city = s.audienceTimezone.split('/').pop()!.replace(/_/g, ' ');
+  $('#ytNext').textContent = `Today in ${city} (${wd}): ${s.postingTimes[wd]}. One Short per day; extra Shorts take the next free days.`;
+}
+$('#ytResetTimes').addEventListener('click', async () => {
+  await api.saveSettings({ postingTimes: { ...RESEARCHED } });
+  renderTimes(RESEARCHED);
+});
 $('#ytAuto').addEventListener('change', (e) => api.saveSettings({ youtubeAutoUpload: (e.target as HTMLInputElement).checked }));
 async function showYouTube() {
   const y = await api.youtubeStatus();
