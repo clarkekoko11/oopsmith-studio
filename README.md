@@ -59,8 +59,9 @@ background. When it's ready, a green **⬆ Update ready** chip appears in the to
 updates). Click it to install and restart, or just close the app and the update installs then. Settings,
 chats, keys and your Claude login are kept (they live in `%APPDATA%\Oopsmith Studio`).
 
-**Publishing a new version (for the maintainer):** bump `version` in `package.json`, commit, then
-`git tag v0.6.1 && git push --tags`. GitHub Actions builds the installer on Windows and publishes the
+**Publishing a new version (for the maintainer):** bump `version` in `package.json`, commit and push, then
+either push a tag (`git tag v0.6.1 && git push --tags`) or run the **Release** workflow from the Actions
+tab (it tags the version for you). GitHub Actions builds the installer on Windows and publishes the
 release; every installed copy picks it up.
 
 ## Run from source (developers)
