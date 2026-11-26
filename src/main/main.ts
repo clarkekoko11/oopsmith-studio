@@ -3,7 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'elect
 import { spawn } from 'node:child_process';
 import { appendFileSync, writeFileSync } from 'node:fs';
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { AccountState, AgentEvent, AgentId, ShortRow, UsageState } from '../shared/types';
 import { checkAccount } from './account';
@@ -11,6 +11,7 @@ import { DAILY_KICKOFF } from './agentDefs';
 import { Pipeline } from './pipeline';
 import { applyUpdate, checkForUpdate } from './updater';
 import { allUsage, totalTokens } from './usage';
+import { disableWorkerUpload, signInYouTube, useClientSecret, youtubeStatus } from './youtube';
 import { detectRenderReady, outputDir, setupRendering, shortsCmd, stopJob } from './render';
 import { basename } from 'node:path';
 import { cloneToolkit, commitAndPush, pullToolkit } from './git';
@@ -32,7 +33,7 @@ const agents = new AgentManager(
   (e: AgentEvent) => send('agent:event', e),
   (u: UsageState) => send('usage', u),
 );
-const pipeline = new Pipeline(agents);
+const pipeline = new Pipeline(agents, join(app.getAppPath(), 'resources', 'yt_upload.py').replace(`app.asar${sep}`, `app.asar.unpacked${sep}`));
 pipeline.onChange = () => send('board:changed', null);
 pipeline.onBlocked = (message) => {
   send('pipeline:blocked', message);
@@ -84,7 +85,7 @@ function shorts(): ShortRow[] {
   const usage = allUsage();
   try {
     const reg = JSON.parse(readFileSync(join(root, 'shorts', 'registry.json'), 'utf8')) as {
-      shorts: Record<string, { id: string; title?: string; topic?: string; status?: string; version?: number; file?: string }>;
+      shorts: Record<string, { id: string; title?: string; topic?: string; status?: string; version?: number; file?: string; youtube_id?: string }>;
     };
     return Object.values(reg.shorts)
       .map((s) => {
@@ -123,7 +124,13 @@ app.whenReady().then(() => {
     let review: string | null = null;
     try { review = readFileSync(join(s.toolkitPath, 'shorts', id, 'review.md'), 'utf8'); } catch { /* none yet */ }
     const video = row?.file && existsSync(join(outputDir(s.toolkitPath), row.file)) ? `toolkit://video/${encodeURIComponent(row.file)}` : null;
-    return { id, status: row?.status ?? '', waiting: pipeline.explain(id), review, videoUrl: video, usage: allUsage()[id] ?? null };
+    let publish: string | null = null;
+    try { publish = readFileSync(join(s.toolkitPath, 'shorts', id, 'publish.md'), 'utf8'); } catch { /* none yet */ }
+    let youtubeId: string | null = null;
+    try {
+      youtubeId = (JSON.parse(readFileSync(join(s.toolkitPath, 'shorts', 'registry.json'), 'utf8')).shorts[id]?.youtube_id as string) ?? null;
+    } catch { /* none */ }
+    return { id, status: row?.status ?? '', waiting: pipeline.explain(id), review, publish, youtubeId, videoUrl: video, usage: allUsage()[id] ?? null };
   });
   // your own decision from the review screen overrides Hawk's
   ipcMain.handle('review:decide', async (_e, id: string, approve: boolean, notes: string) => {
@@ -146,6 +153,35 @@ app.whenReady().then(() => {
     await pipeline.tick();
     const next = approve ? '' : ` ${pipeline.explain(id)}`;
     return { ok: true, message: `${approve ? 'Approved' : 'Changes requested'}. ${g.message}${next}` };
+  });
+  ipcMain.handle('review:upload', async (_e, id: string) => {
+    const s = loadSettings();
+    if (!youtubeStatus(s.toolkitPath).signedIn) return { ok: false, message: 'Connect YouTube first: Settings → YouTube.' };
+    pipeline.requestUpload(id);
+    await pipeline.tick();
+    return { ok: true, message: pipeline.explain(id) };
+  });
+  ipcMain.handle('youtube:status', () => youtubeStatus(loadSettings().toolkitPath));
+  ipcMain.handle('youtube:client-secret', async () => {
+    const r = await dialog.showOpenDialog(win!, { title: 'Choose client_secret.json (OAuth client, Desktop app)', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, message: 'No file chosen.' };
+    try {
+      const j = JSON.parse(readFileSync(r.filePaths[0], 'utf8'));
+      if (!j.installed && !j.web) return { ok: false, message: "That file doesn't look like a Google OAuth client (Desktop app)." };
+      useClientSecret(loadSettings().toolkitPath, r.filePaths[0]);
+      return { ok: true, message: 'client_secret.json saved in the toolkit (it is git-ignored, never pushed).' };
+    } catch (e) {
+      return { ok: false, message: `Couldn't read it: ${(e as Error).message}` };
+    }
+  });
+  ipcMain.handle('youtube:sign-in', async () => {
+    const s = loadSettings();
+    const r = await signInYouTube(s.pythonCommand, s.toolkitPath, (l) => send('youtube:log', l));
+    if (r.ok && disableWorkerUpload(s.toolkitPath)) {
+      send('youtube:log', "Turned off the render worker's own YouTube upload: uploads now happen after review, through Pip.");
+    }
+    if (r.ok) void pipeline.tick();
+    return r;
   });
   ipcMain.handle('review:send-on', async (_e, id: string) => {
     pipeline.follow(id);

@@ -67,6 +67,10 @@
           <div class="review-side">
             <div id="reviewWaiting" class="waiting"><span></span><button class="ghost" id="sendOnBtn">Send on</button></div>
             <div id="reviewText" class="msg agent"></div>
+            <div id="publishBox" hidden>
+              <div id="publishText" class="msg agent"></div>
+              <div class="field"><button class="ghost" id="uploadBtn">Upload to YouTube</button><a id="studioLink" class="ghost linkbtn" target="_blank" rel="noreferrer" hidden>Open in YouTube Studio</a></div>
+            </div>
             <div id="reviewUsage"></div>
             <textarea id="reviewNotes" rows="3" placeholder="Your notes (needed to request changes)"></textarea>
             <div class="field"><button id="approveBtn">Approve</button><button class="ghost" id="changesBtn">Request changes</button></div>
@@ -125,12 +129,39 @@
         <pre id="setupLog" hidden></pre>
       </section>
 
+      <section>
+        <h3>YouTube <span class="muted small" id="ytState"></span></h3>
+        <p class="muted small">Pip uploads approved Shorts with your toolkit's uploader: <b>private</b> (you press publish in YouTube Studio) or <b>scheduled</b> for an hour the next day. Never public straight away. One-time setup (AUTOMATION.md step 4): in Google Cloud Console enable "YouTube Data API v3", create an OAuth client of type <b>Desktop app</b> and download its JSON.</p>
+        <div class="field"><button class="ghost" id="ytSecret">1. Choose client_secret.json…</button><button class="ghost" id="ytSignIn">2. Sign in to YouTube</button></div>
+        <div class="two">
+          <label>After approval
+            <select id="ytMode">
+              <option value="private">Upload as private</option>
+              <option value="scheduled">Upload scheduled (goes public at…)</option>
+            </select>
+          </label>
+          <label>Scheduled hour (next day)
+            <input id="ytHour" type="number" min="0" max="23" />
+          </label>
+        </div>
+        <label class="small"><input type="checkbox" id="ytAuto" /> Upload automatically after Hawk approves (otherwise press Upload on the review screen)</label>
+        <p class="muted small" id="ytMsg"></p>
+        <pre id="ytLog" hidden></pre>
+      </section>
+
       <section class="two">
         <label>Editor model
           <select id="editorModel">
             <option value="sonnet">Sonnet (balanced)</option>
             <option value="opus">Opus (best results)</option>
             <option value="haiku">Haiku (lightest)</option>
+          </select>
+        </label>
+        <label>Publisher model
+          <select id="publisherModel">
+            <option value="sonnet">Sonnet (balanced)</option>
+            <option value="haiku">Haiku (lightest)</option>
+            <option value="opus">Opus (best writing)</option>
           </select>
         </label>
         <label>Reviewer model

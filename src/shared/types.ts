@@ -69,6 +69,12 @@ export interface Settings {
   lastDailyRun: string;
   /** render_worker.py --setup has finished on this PC */
   renderReady: boolean;
+  publisherModel: string;
+  /** upload approved Shorts by themselves (otherwise wait for your Upload click) */
+  youtubeAutoUpload: boolean;
+  /** private: you publish in YouTube Studio; scheduled: goes public at youtubeHour the next day */
+  youtubeMode: 'private' | 'scheduled';
+  youtubeHour: number;
 }
 
 export interface UpdateInfo {
@@ -110,6 +116,9 @@ export interface ShortRow {
 
 export interface ReviewInfo {
   id: string;
+  /** publish.md text (upload details) */
+  publish: string | null;
+  youtubeId: string | null;
   /** what the Short is waiting for right now */
   waiting: string;
   status: string;
@@ -124,6 +133,11 @@ export interface StudioApi {
   getReview(id: string): Promise<ReviewInfo>;
   decideReview(id: string, approve: boolean, notes: string): Promise<{ ok: boolean; message: string }>;
   sendOn(id: string): Promise<string>;
+  uploadNow(id: string): Promise<{ ok: boolean; message: string }>;
+  youtubeStatus(): Promise<{ hasClientSecret: boolean; signedIn: boolean; workerAutoUpload: boolean }>;
+  chooseClientSecret(): Promise<{ ok: boolean; message: string }>;
+  signInYouTube(): Promise<{ ok: boolean; message: string }>;
+  onYouTubeLog(cb: (line: string) => void): () => void;
   onPipelineBlocked(cb: (message: string) => void): () => void;
   appVersion(): Promise<string>;
   runDaily(): Promise<void>;

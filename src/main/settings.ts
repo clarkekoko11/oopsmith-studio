@@ -26,6 +26,10 @@ function defaults(): Stored {
     dailyTime: '09:00',
     lastDailyRun: '',
     renderReady: false,
+    publisherModel: 'sonnet',
+    youtubeAutoUpload: true,
+    youtubeMode: 'private',
+    youtubeHour: 18,
   };
 }
 
@@ -35,7 +39,7 @@ export function loadSettings(): Settings {
     const stored = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<Stored>;
     for (const [k, v] of Object.entries(stored)) {
       // blank values (e.g. saved by an older version) fall back to the defaults
-      if (typeof v === 'string' && !v.trim() && ['toolkitPath', 'toolkitRepo', 'pythonCommand', 'scriptWriterModel', 'editorModel', 'reviewerModel'].includes(k)) continue;
+      if (typeof v === 'string' && !v.trim() && ['toolkitPath', 'toolkitRepo', 'pythonCommand', 'scriptWriterModel', 'editorModel', 'reviewerModel', 'publisherModel'].includes(k)) continue;
       (s as unknown as Record<string, unknown>)[k] = v;
     }
   } catch { /* first run */ }

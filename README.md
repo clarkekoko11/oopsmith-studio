@@ -1,7 +1,7 @@
-# Oopsmith Studio — Phase 3
+# Oopsmith Studio — Phase 4
 
-A walkable 3D office where AI agents make your Oopsmith Shorts. Three desks are working:
-**Scripty, the Script Writer**, **Cutter, the Editor** and **Hawk, the Reviewer**. Pip the Publisher comes in Phase 4.
+A walkable 3D office where AI agents make your Oopsmith Shorts. All four desks are working:
+**Scripty, the Script Writer**, **Cutter, the Editor**, **Hawk, the Reviewer** and **Pip, the Publisher**.
 
 **The pipeline (autopilot, no questions):** Scripty writes + voices a Short → status `voiced` → Cutter builds
 the cast, sets, story, sound and captions, runs the still checks → `ready_to_render` → the app renders it on
@@ -10,6 +10,17 @@ a contact sheet of frames against the script, caption sync) → `approved`, or `
 list in `shorts/<ID>/review.md` → Cutter fixes those shots → re-render as v2 → Hawk again. From v3 on Hawk
 approves unless it's badly broken and lists the rest under "Needs your eye". A failed render goes back to
 Cutter with the error (up to 2 fixes per Short).
+
+**Publishing (Pip):** an `approved` Short goes to Pip, who writes `shorts/<ID>/publish.json` + `publish.md` (title,
+3 alternatives, description with the verified facts and a question, 15–20 tags; your skill's step 7b rules) →
+`ready_to_publish` → the app uploads it with the toolkit's `tools/youtube_upload.py` as **private** (you publish in
+YouTube Studio) or **scheduled** for an hour the next day → `uploaded_private` / `uploaded_scheduled`, with a
+YouTube Studio link in Pip's chat and on the review screen. Never public straight away.
+
+Connect YouTube once in Settings → YouTube: (1) choose the `client_secret.json` of a Google Cloud OAuth client
+(Desktop app, YouTube Data API v3 enabled — AUTOMATION.md step 4); (2) Sign in to YouTube (installs Google's
+packages, opens the browser). Signing in turns off the render worker's own upload, so uploads only happen after
+review. Turn off "Upload automatically" to press **Upload** yourself on the review screen.
 
 **Review screen:** click the TV on the back wall (or 🎬 Review in the top bar) to watch any render, read
 Hawk's review and the tokens each desk used, and Approve or Request changes yourself — your call overrides
@@ -124,7 +135,6 @@ resources/       bundled copy of viral-short-script.md (the toolkit's copy wins 
 ```
 
 ## Current limits
-- Scripty, Cutter and Hawk are live; Pip (Publisher) shows "arrives in Phase 4".
 - Models default to Sonnet for every desk (Settings to change). Each job has a step cap so a stuck agent can't burn your plan.
 - One Short moves through the pipeline at a time. Building a Short uses a lot of Claude usage (many steps and still checks); on Pro, expect roughly one Short a day.
 - Plan usage appears in the top bar after the first message (it's reported with each reply).

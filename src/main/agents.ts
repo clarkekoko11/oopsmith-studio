@@ -167,7 +167,7 @@ class AgentSession {
       options: {
         cwd: root,
         resume: this.sessionId,
-        model: ({ editor: settings.editorModel, reviewer: settings.reviewerModel } as Partial<Record<AgentId, string>>)[this.id] ?? settings.scriptWriterModel,
+        model: ({ editor: settings.editorModel, reviewer: settings.reviewerModel, publisher: settings.publisherModel } as Partial<Record<AgentId, string>>)[this.id] ?? settings.scriptWriterModel,
         // a safety cap per job, so a stuck agent can't burn through the plan
         maxTurns: { 'script-writer': 80, editor: 160, reviewer: 50, publisher: 40 }[this.id],
         systemPrompt: { type: 'preset', preset: 'claude_code', append },
@@ -383,6 +383,7 @@ export class AgentManager {
   post(id: AgentId, item: NewItem) {
     this.sessions.get(id)?.put({ id: uid(), at: Date.now(), ...item } as ChatItem);
   }
+  setCurrentShort(id: AgentId, short: string) { const s = this.sessions.get(id); if (s) s.currentShort = short; }
   /** Mark a desk busy with app work (rendering); undefined clears it. */
   setExternal(id: AgentId, activity: string | undefined) {
     const s = this.sessions.get(id);

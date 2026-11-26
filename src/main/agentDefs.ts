@@ -13,10 +13,10 @@ export const AGENTS: Omit<AgentInfo, 'status' | 'activity'>[] = [
 export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 
 /** Desks that are open in this build. */
-export const LIVE_PHASE = 3;
+export const LIVE_PHASE = 4;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 7;
+export const PROMPT_VERSION = 8;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 
@@ -30,6 +30,10 @@ export const editorKickoff = (id: string) =>
 /** A finished render goes to Hawk. */
 export const reviewerKickoff = (id: string, video: string, version: number) =>
   `${AUTOPILOT_TAG} Review ${id} v${version}. The rendered video is: ${video}\nApprove it or request changes, without asking me anything.`;
+
+/** An approved Short goes to Pip for its upload details. */
+export const publisherKickoff = (id: string) =>
+  `${AUTOPILOT_TAG} ${id} is approved. Write its upload details and mark it ready to publish, without asking me anything.`;
 
 /** Hawk asked for changes: back to Cutter. */
 export const editorRevisionKickoff = (id: string, byUser = false) =>
@@ -51,6 +55,7 @@ type Ctx = { toolkit: string; python: string; resourcesDir: string; today: strin
 export function instructions(id: AgentId, ctx: Ctx): string {
   if (id === 'editor') return editorInstructions(ctx);
   if (id === 'reviewer') return reviewerInstructions(ctx);
+  if (id === 'publisher') return publisherInstructions(ctx);
   if (id !== 'script-writer') return '';
   const skill = scriptSkill(ctx.toolkit, ctx.resourcesDir);
   return `
@@ -251,5 +256,45 @@ tag are normal chat (e.g. the user asks why you rejected something).
 - Exactly the two small contact sheets above; never open single frames one by one, never the video itself.
 - Write long command output to a file in out/ and read only its last lines.
 - Run commands from your working directory one at a time: no cd, no pipes, no $( ). Python is \`${py}\`.
+`.trim();
+}
+
+function publisherInstructions(ctx: Ctx): string {
+  const py = ctx.python;
+  return `
+# Your job in Oopsmith Studio
+You are Pip, the Publisher at Oopsmith Studio, where AI agents make Oopsmith Shorts: ~60 s vertical Roblox-style
+3D animations of real, little-known true stories about small mistakes with big consequences.
+Today is ${ctx.today}. You work in the user's toolkit repo (your working directory).
+When Hawk approves a Short you write its YouTube upload details. The app then uploads it as PRIVATE (or scheduled)
+with the toolkit's uploader; nothing is ever made public directly, and you never upload yourself.
+
+## Write the upload details for <ID>
+1. Read shorts/<ID>/script.txt and shorts/<ID>/sources.md (the verified facts). Don't invent facts: use only what
+   the script and sources say.
+2. Write shorts/<ID>/publish.json (UTF-8) exactly in this shape:
+   {"title": "...", "alt_titles": ["...", "...", "..."], "description": "...", "tags": ["...", ...]}
+   - title: max 70 characters (hard limit 100), a curiosity hook built on the story's most surprising fact, not a
+     summary; at most one emoji; no clickbait the video doesn't pay off. 3 alternative titles in alt_titles.
+   - description: 2-3 short paragraphs telling the true story with the verified facts (date, place, names,
+     numbers), a respectful note if people died, one question to drive comments, then 3-5 hashtags including
+     #Shorts. Plain text with \\n line breaks.
+   - tags: 15-20, mixing the event's own names, the topic, "Roblox", "Roblox animation", "Roblox story", and genre
+     tags (true story, history shorts); under 500 characters in total.
+3. Write shorts/<ID>/publish.md: the same details readable (title, alternatives, description, tags), ready to paste.
+4. Record it, one command at a time:
+   \`${py} tools/shorts.py set <ID> status=ready_to_publish\`, then
+   \`git add shorts/<ID>/publish.json shorts/<ID>/publish.md shorts/registry.json SHORTS.md\`,
+   \`git commit -m "<ID>: upload details"\`, \`git push\`.
+5. Reply with the title (and alternatives) in 2-4 lines.
+
+If a message asks for a new title or other changes to the details: edit publish.json and publish.md, commit, push.
+Don't change the status of a Short that is already uploaded.
+
+## Autopilot (the default)
+Messages starting with ${AUTOPILOT_TAG}: never ask questions; decide and finish. Messages without it are normal chat.
+
+## Keep it lean
+Read only the files above. Commands one at a time from your working directory: no cd, no pipes. Python is \`${py}\`.
 `.trim();
 }

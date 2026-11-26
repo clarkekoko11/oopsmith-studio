@@ -22,11 +22,13 @@ const STARTERS: Partial<Record<AgentId, string[]>> = {
   ],
   editor: ['What are you working on?', 'Build the latest voiced Short.', 'Why did the last render fail?'],
   reviewer: ['What did you think of the last Short?', 'Review the latest render again.', 'What do you check for?'],
+  publisher: ['Give the latest Short a punchier title.', 'What is uploaded so far?', 'Write upload details for the latest approved Short.'],
 };
 const BLURB: Partial<Record<AgentId, string>> = {
   'script-writer': 'finds true stories, checks the facts, writes your script and makes the voiceover.',
   editor: 'builds the cast, sets, story, sound and captions, checks the stills, and renders on your graphics card.',
   reviewer: 'watches every render, checks picture, captions and sound against the script, and approves it or sends Cutter a fix list.',
+  publisher: 'writes the title, description and tags for every approved Short and uploads it to YouTube as private or scheduled.',
 };
 
 let agents: AgentInfo[] = [];
@@ -311,6 +313,11 @@ async function openSettings() {
   ($('#model') as HTMLSelectElement).value = s.scriptWriterModel;
   ($('#editorModel') as HTMLSelectElement).value = s.editorModel;
   ($('#reviewerModel') as HTMLSelectElement).value = s.reviewerModel;
+  ($('#publisherModel') as HTMLSelectElement).value = s.publisherModel;
+  ($('#ytMode') as HTMLSelectElement).value = s.youtubeMode;
+  ($('#ytHour') as HTMLInputElement).value = String(s.youtubeHour);
+  ($('#ytAuto') as HTMLInputElement).checked = s.youtubeAutoUpload;
+  void showYouTube();
   $('#renderState').textContent = s.renderReady ? '· set up ✓' : '· not set up yet';
   ($('#python') as HTMLInputElement).value = s.pythonCommand;
   ($('#dailyTime') as HTMLInputElement).value = s.dailyTime;
@@ -352,6 +359,36 @@ api.onToolkit((t) => {
   toolkitProblem = !t.busy && t.ok === false ? t.message : null;
   if (!t.busy && t.ok) void loadBoard();
   void updateBanner(undefined, t.busy ? t.message : null);
+});
+$('#publisherModel').addEventListener('change', (e) => api.saveSettings({ publisherModel: (e.target as HTMLSelectElement).value }));
+$('#ytMode').addEventListener('change', (e) => api.saveSettings({ youtubeMode: (e.target as HTMLSelectElement).value as 'private' | 'scheduled' }));
+$('#ytHour').addEventListener('change', (e) => api.saveSettings({ youtubeHour: Math.min(23, Math.max(0, Number((e.target as HTMLInputElement).value) || 18)) }));
+$('#ytAuto').addEventListener('change', (e) => api.saveSettings({ youtubeAutoUpload: (e.target as HTMLInputElement).checked }));
+async function showYouTube() {
+  const y = await api.youtubeStatus();
+  $('#ytState').textContent = y.signedIn ? '· connected ✓' : y.hasClientSecret ? '· step 2: sign in' : '· not connected';
+  if (y.workerAutoUpload) $('#ytMsg').textContent = 'Note: your render worker is set to upload by itself before review. Signing in here turns that off, so uploads happen only after approval.';
+}
+const ytMsg = (r: { ok: boolean; message: string }) => {
+  const m = $('#ytMsg');
+  m.textContent = r.message;
+  m.className = `muted small ${r.ok ? 'ok-text' : 'bad-text'}`;
+};
+$('#ytSecret').addEventListener('click', async () => { ytMsg(await api.chooseClientSecret()); void showYouTube(); });
+const ytLines: string[] = [];
+api.onYouTubeLog((l) => {
+  ytLines.push(l);
+  if (ytLines.length > 40) ytLines.shift();
+  const log = $('#ytLog');
+  log.hidden = false;
+  log.textContent = ytLines.join('\n');
+  log.scrollTop = log.scrollHeight;
+});
+$('#ytSignIn').addEventListener('click', async () => {
+  ytLines.length = 0;
+  ytMsg({ ok: true, message: 'Signing in… finish it in the browser window.' });
+  ytMsg(await api.signInYouTube());
+  void showYouTube();
 });
 $('#reviewerModel').addEventListener('change', (e) => api.saveSettings({ reviewerModel: (e.target as HTMLSelectElement).value }));
 $('#editorModel').addEventListener('change', (e) => api.saveSettings({ editorModel: (e.target as HTMLSelectElement).value }));
@@ -486,6 +523,14 @@ async function showReview(id: string) {
   w.hidden = !info.waiting;
   w.querySelector('span')!.textContent = `${info.status ? info.status + ' · ' : ''}${info.waiting}`;
   ($('#sendOnBtn') as HTMLButtonElement).hidden = !/Waiting|Next in line|Rendered before/.test(info.waiting);
+  const pb = $('#publishBox');
+  pb.hidden = !info.publish && !info.youtubeId;
+  $('#publishText').innerHTML = info.publish ? renderMarkdown(info.publish) : '';
+  const up = $('#uploadBtn') as HTMLButtonElement;
+  up.hidden = !(info.status === 'ready_to_publish');
+  const link = $('#studioLink') as HTMLAnchorElement;
+  link.hidden = !info.youtubeId;
+  if (info.youtubeId) link.href = `https://studio.youtube.com/video/${info.youtubeId}/edit`;
   $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review) : '<p>Hawk hasn\'t reviewed this one yet.</p>';
   $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted small">No token data yet (counted from Phase 3 on).</p>';
   $('#reviewMsg').textContent = '';
@@ -517,6 +562,12 @@ async function decide(approve: boolean) {
   await loadBoard();
   await showReview(reviewing);
 }
+$('#uploadBtn').addEventListener('click', async () => {
+  if (!reviewing) return;
+  const r = await api.uploadNow(reviewing);
+  $('#reviewMsg').textContent = r.message;
+  await showReview(reviewing);
+});
 $('#sendOnBtn').addEventListener('click', async () => {
   if (!reviewing) return;
   $('#reviewMsg').textContent = await api.sendOn(reviewing);
