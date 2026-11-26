@@ -405,6 +405,16 @@ const pubMsg = (r: { ok: boolean; message: string }) => {
 };
 async function showPublishing() {
   const s = await api.getSettings();
+  ($('#publishVia') as HTMLSelectElement).value = s.publishVia;
+  $('#pubYouTube').hidden = s.publishVia !== 'youtube';
+  $('#pubBuffer').hidden = s.publishVia !== 'buffer';
+  $('#pubManual').hidden = s.publishVia !== 'manual';
+  $('#pubSchedule').hidden = s.publishVia === 'manual';
+  if (s.publishVia === 'youtube') {
+    const y = await api.youtubeStatus();
+    ($('#ytSignIn') as HTMLButtonElement).textContent = y.signedIn ? '2. Signed in ✓ (sign in again)' : '2. Sign in to YouTube';
+    ($('#ytSecret') as HTMLButtonElement).textContent = y.hasClientSecret ? '1. client_secret.json ✓ (replace)' : '1. Choose client_secret.json…';
+  }
   for (const f of HOST_FIELDS) ($(`#${f}`) as HTMLInputElement).value = s[f];
   ($('#mediaHost') as HTMLSelectElement).value = s.mediaHost;
   ($('#ytCategory') as HTMLSelectElement).value = s.youtubeCategory;
@@ -417,6 +427,12 @@ async function showPublishing() {
   }
   sel.value = s.bufferChannelId;
   const p = await api.publishingStatus();
+  if (s.publishVia !== 'buffer') {
+    $('#pubState').textContent = s.publishVia === 'manual' ? '· you post' : p.missing ? '· not ready' : '· ready ✓';
+    if (p.missing) pubMsg({ ok: false, message: `Still needed: ${p.missing}` });
+    else pubMsg({ ok: true, message: '' });
+    return;
+  }
   ($('#bufferKey') as HTMLInputElement).placeholder = p.hasBufferKey ? '•••••••• saved (paste a new one to replace)' : 'Paste your Buffer API key';
   $('#pubState').textContent = p.missing ? '· not ready' : '· ready ✓';
   if (p.missing) pubMsg({ ok: false, message: `Still needed: ${p.missing}` });
@@ -440,6 +456,27 @@ async function loadChannels() {
   if (r.message) pubMsg({ ok: false, message: r.message });
   void showPublishing();
 }
+$('#publishVia').addEventListener('change', async (e) => {
+  await api.saveSettings({ publishVia: (e.target as HTMLSelectElement).value as 'youtube' | 'buffer' | 'manual' });
+  pubMsg({ ok: true, message: '' });
+  void showPublishing();
+});
+$('#ytSecret').addEventListener('click', async () => { pubMsg(await api.chooseClientSecret()); void showPublishing(); });
+const ytLines: string[] = [];
+api.onYouTubeLog((l) => {
+  ytLines.push(l);
+  if (ytLines.length > 40) ytLines.shift();
+  const log = $('#ytLog');
+  log.hidden = false;
+  log.textContent = ytLines.join('\n');
+  log.scrollTop = log.scrollHeight;
+});
+$('#ytSignIn').addEventListener('click', async () => {
+  ytLines.length = 0;
+  pubMsg({ ok: true, message: 'Signing in… finish it in the browser window.' });
+  pubMsg(await api.signInYouTube());
+  void showPublishing();
+});
 $('#saveBufferKey').addEventListener('click', async () => {
   const v = ($('#bufferKey') as HTMLInputElement).value;
   if (!v.trim()) return pubMsg({ ok: false, message: 'Paste the key first.' });
@@ -612,9 +649,21 @@ async function showReview(id: string) {
   pb.hidden = !info.publish && !info.inBuffer;
   $('#publishText').innerHTML = info.publish ? renderMarkdown(info.publish) : '';
   const up = $('#uploadBtn') as HTMLButtonElement;
-  up.hidden = !/^(ready_to_publish|publish_failed)$/.test(info.status);
-  up.textContent = info.status === 'publish_failed' ? 'Try Buffer again' : 'Schedule in Buffer';
-  ($('#studioLink') as HTMLAnchorElement).hidden = !info.inBuffer;
+  const via = (await api.getSettings()).publishVia;
+  up.hidden = via === 'manual' || !/^(ready_to_publish|publish_failed)$/.test(info.status);
+  up.textContent = info.status === 'publish_failed' ? 'Try again' : 'Publish now';
+  ($('#bufferLink') as HTMLAnchorElement).hidden = !info.inBuffer;
+  const yl = $('#studioLink') as HTMLAnchorElement;
+  yl.hidden = !info.youtubeId;
+  if (info.youtubeId) yl.href = `https://studio.youtube.com/video/${info.youtubeId}/edit`;
+  const posted = info.status === 'published_manual';
+  ($('#markPosted') as HTMLButtonElement).hidden = posted;
+  ($('#postedAt') as HTMLInputElement).hidden = posted;
+  ($('#unmarkPosted') as HTMLButtonElement).hidden = !posted;
+  ($('#postedBox').querySelector('span') as HTMLElement).textContent = posted ? 'You posted this yourself.' : 'Posted it yourself?';
+  const pa = $('#postedAt') as HTMLInputElement;
+  const d = info.publishAt ? new Date(info.publishAt) : new Date();
+  pa.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review) : '<p>Hawk hasn\'t reviewed this one yet.</p>';
   $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted small">No token data yet (counted from Phase 3 on).</p>';
   $('#reviewMsg').textContent = '';
@@ -646,6 +695,19 @@ async function decide(approve: boolean) {
   await loadBoard();
   await showReview(reviewing);
 }
+$('#markPosted').addEventListener('click', async () => {
+  if (!reviewing) return;
+  const v = ($('#postedAt') as HTMLInputElement).value;
+  $('#reviewMsg').textContent = await api.markPosted(reviewing, v ? new Date(v).toISOString() : null);
+  await loadBoard();
+  await showReview(reviewing);
+});
+$('#unmarkPosted').addEventListener('click', async () => {
+  if (!reviewing) return;
+  $('#reviewMsg').textContent = await api.unmarkPosted(reviewing);
+  await loadBoard();
+  await showReview(reviewing);
+});
 $('#uploadBtn').addEventListener('click', async () => {
   if (!reviewing) return;
   const r = await api.uploadNow(reviewing);

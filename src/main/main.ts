@@ -14,6 +14,7 @@ import { allUsage, totalTokens } from './usage';
 import { disableWorkerUpload, listChannels } from './buffer';
 import { getSecret, hasSecret, setSecret } from './secrets';
 import { publishSetupMissing } from './pipeline';
+import { signInYouTube, useClientSecret, youtubeStatus } from './youtube';
 import { detectRenderReady, outputDir, setupRendering, shortsCmd, stopJob } from './render';
 import { basename } from 'node:path';
 import { cloneToolkit, commitAndPush, pullToolkit } from './git';
@@ -35,7 +36,8 @@ const agents = new AgentManager(
   (e: AgentEvent) => send('agent:event', e),
   (u: UsageState) => send('usage', u),
 );
-const pipeline = new Pipeline(agents);
+const helper = (f: string) => join(app.getAppPath(), 'resources', f).replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
+const pipeline = new Pipeline(agents, { upload: helper('yt_upload.py'), status: helper('yt_status.py') });
 pipeline.onChange = () => send('board:changed', null);
 pipeline.onBlocked = (message) => {
   send('pipeline:blocked', message);
@@ -128,8 +130,13 @@ app.whenReady().then(() => {
     const video = row?.file && existsSync(join(outputDir(s.toolkitPath), row.file)) ? `toolkit://video/${encodeURIComponent(row.file)}` : null;
     let publish: string | null = null;
     try { publish = readFileSync(join(s.toolkitPath, 'shorts', id, 'publish.md'), 'utf8'); } catch { /* none yet */ }
-    const inBuffer = /queued_buffer|draft_in_buffer|published/.test(row?.status ?? '');
-    return { id, status: row?.status ?? '', waiting: pipeline.explain(id), review, publish, inBuffer, videoUrl: video, usage: allUsage()[id] ?? null };
+    let m: { buffer_post_id?: string; youtube_id?: string; publish_at?: string } = {};
+    try { m = JSON.parse(readFileSync(join(s.toolkitPath, 'shorts', 'registry.json'), 'utf8')).shorts[id] ?? {}; } catch { /* none */ }
+    return {
+      id, status: row?.status ?? '', waiting: pipeline.explain(id), review, publish,
+      inBuffer: Boolean(m.buffer_post_id), youtubeId: m.youtube_id || null, publishAt: m.publish_at || null,
+      videoUrl: video, usage: allUsage()[id] ?? null,
+    };
   });
   // your own decision from the review screen overrides Hawk's
   ipcMain.handle('review:decide', async (_e, id: string, approve: boolean, notes: string) => {
@@ -184,6 +191,37 @@ app.whenReady().then(() => {
     } catch (e) {
       return { ok: false, message: (e as Error).message };
     }
+  });
+  ipcMain.handle('youtube:status', () => youtubeStatus(loadSettings().toolkitPath));
+  ipcMain.handle('youtube:client-secret', async () => {
+    const r = await dialog.showOpenDialog(win!, { title: 'Choose client_secret.json (OAuth client, Desktop app)', properties: ['openFile'], filters: [{ name: 'JSON', extensions: ['json'] }] });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, message: 'No file chosen.' };
+    try {
+      const j = JSON.parse(readFileSync(r.filePaths[0], 'utf8'));
+      if (!j.installed && !j.web) return { ok: false, message: "That file doesn't look like a Google OAuth client (Desktop app)." };
+      useClientSecret(loadSettings().toolkitPath, r.filePaths[0]);
+      return { ok: true, message: 'client_secret.json saved in the toolkit (it is git-ignored, never pushed).' };
+    } catch (e) {
+      return { ok: false, message: `Couldn't read it: ${(e as Error).message}` };
+    }
+  });
+  ipcMain.handle('youtube:sign-in', async () => {
+    const s = loadSettings();
+    const r = await signInYouTube(s.pythonCommand, s.toolkitPath, (l) => send('youtube:log', l));
+    if (r.ok && disableWorkerUpload(s.toolkitPath)) send('youtube:log', "Turned off the render worker's own YouTube upload: posts only go out after review.");
+    if (r.ok) void pipeline.tick();
+    return r;
+  });
+  ipcMain.handle('review:mark-posted', async (_e, id: string, whenIso: string | null) => {
+    await pipeline.markPosted(id, whenIso);
+    send('board:changed', null);
+    return pipeline.explain(id);
+  });
+  ipcMain.handle('review:unmark-posted', async (_e, id: string) => {
+    await pipeline.unmarkPosted(id);
+    send('board:changed', null);
+    await pipeline.tick();
+    return pipeline.explain(id);
   });
   ipcMain.handle('publish:channels', async () => {
     const key = getSecret('buffer');

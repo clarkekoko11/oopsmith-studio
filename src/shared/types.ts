@@ -75,6 +75,8 @@ export interface Settings {
   /** private: you publish in YouTube Studio; scheduled: goes public at youtubeHour the next day */
   youtubeMode: 'private' | 'scheduled';
   youtubeHour: number;
+  /** how approved Shorts get posted; switch any time */
+  publishVia: 'youtube' | 'buffer' | 'manual';
   /** Buffer channel (your YouTube channel inside Buffer) */
   bufferChannelId: string;
   bufferChannelName: string;
@@ -137,6 +139,8 @@ export interface ReviewInfo {
   publish: string | null;
   /** true once the post exists in Buffer (scheduled, draft or published) */
   inBuffer: boolean;
+  youtubeId: string | null;
+  publishAt: string | null;
   /** what the Short is waiting for right now */
   waiting: string;
   status: string;
@@ -155,6 +159,12 @@ export interface StudioApi {
   publishingStatus(): Promise<{ hasBufferKey: boolean; channel: string; hostReady: boolean; missing: string | null; workerAutoUpload: boolean }>;
   setSecret(name: 'buffer' | 'cloudinarySecret' | 'r2Secret', value: string): Promise<{ ok: boolean; message: string }>;
   bufferChannels(): Promise<{ ok: boolean; message: string; channels: { id: string; name: string; service: string }[] }>;
+  youtubeStatus(): Promise<{ hasClientSecret: boolean; signedIn: boolean }>;
+  chooseClientSecret(): Promise<{ ok: boolean; message: string }>;
+  signInYouTube(): Promise<{ ok: boolean; message: string }>;
+  onYouTubeLog(cb: (line: string) => void): () => void;
+  markPosted(id: string, whenIso: string | null): Promise<string>;
+  unmarkPosted(id: string): Promise<string>;
   onPipelineBlocked(cb: (message: string) => void): () => void;
   appVersion(): Promise<string>;
   runDaily(): Promise<void>;

@@ -8,15 +8,19 @@ import { commitAndPush } from './git';
 import { createShortPost, postStatus } from './buffer';
 import { checkPublic, hostVideo } from './media';
 import { getSecret } from './secrets';
+import { uploadBusy, uploadShort, youtubeStatus, youtubeVideoStatus } from './youtube';
 import { dayKey, describeSlot, nextSlot } from './schedule';
 import type { AgentManager } from './agents';
 import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
 
-type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string }> };
+type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
+
+/** Statuses that take a day in the one-Short-a-day schedule. */
+const TAKES_A_DAY = /^(queued_buffer|uploaded_scheduled|published|published_manual)$/;
 
 let publishing = false;
-const publishBusy = () => publishing;
+const publishBusy = () => publishing || uploadBusy();
 
 export class Pipeline {
   private tries = new Map<string, number>(); // `${kind}:${id}` -> attempts this session
@@ -31,7 +35,7 @@ export class Pipeline {
   /** when each Buffer post was last checked (to stay well inside Buffer's API limits) */
   private lastPoll = new Map<string, number>();
 
-  constructor(private agents: AgentManager) {}
+  constructor(private agents: AgentManager, private helpers: { upload: string; status: string }) {}
 
   requestUpload(id: string) {
     this.uploadNow.add(id);
@@ -85,18 +89,22 @@ export class Pipeline {
     const busy = (a: AgentId) => this.agents.currentWork(a);
     if (this.why.has(id)) return this.why.get(id)!;
     const when = m.publish_at ? describeSlot(Date.parse(m.publish_at), s.audienceTimezone) : '';
-    if (st === 'published') return `Published on YouTube through Buffer${when ? ` (${when})` : ''}.`;
+    if (st === 'published') return `Published on YouTube${when ? ` (${when})` : ''}.`;
+    if (st === 'published_manual') return `You posted this yourself${when ? ` (${when})` : ''}. That day counts as this Short's day in the schedule.`;
+    if (st === 'uploaded_scheduled') return `On YouTube as private; YouTube makes it public ${when}.`;
+    if (st === 'uploaded_private') return 'On YouTube as private: publish it in YouTube Studio when you like.';
     if (st === 'queued_buffer') return `Scheduled in Buffer: goes live ${when}.`;
     if (st === 'draft_in_buffer') return 'Saved as a draft in Buffer: schedule it there when you like.';
-    if (st === 'publish_failed') return `Buffer couldn't publish it: ${m.error ?? 'unknown error'}. Press "Send on" to try again.`;
-    if (publishBusy() && busy('publisher') === id) return 'Putting the video online and scheduling it in Buffer…';
+    if (st === 'publish_failed') return `Publishing failed: ${m.error ?? 'unknown error'}. Press "Try again" on the review screen.`;
+    if (publishBusy() && busy('publisher') === id) return s.publishVia === 'buffer' ? 'Putting the video online and scheduling it in Buffer…' : 'Uploading to YouTube…';
     if (busy('publisher') === id) return 'Pip is writing the upload details.';
     if (st === 'approved') return this.agents.isIdle('publisher') ? 'Next in line for Pip (upload details).' : `Waiting for Pip (busy with ${busy('publisher') ?? 'another Short'}).`;
     if (st === 'ready_to_publish') {
       const missing = publishSetupMissing(s);
       if (missing) return `Waiting: ${missing}`;
-      if (!s.youtubeAutoUpload && !this.uploadNow.has(id)) return 'Ready: press "Schedule in Buffer".';
-      return 'Next in line to schedule in Buffer.';
+      if (s.publishVia === 'manual') return 'Ready for you to post (details below). Then press "I posted it myself".';
+      if (!s.youtubeAutoUpload && !this.uploadNow.has(id)) return 'Ready: press "Publish now".';
+      return s.publishVia === 'buffer' ? 'Next in line to schedule in Buffer.' : 'Next in line to upload to YouTube.';
     }
     if (busy('editor') === id) return 'Cutter is working on it now.';
     if (busy('reviewer') === id) return 'Hawk is reviewing it now.';
@@ -124,7 +132,7 @@ export class Pipeline {
     this.why.clear();
     const allowed = (id: string) => s.autopilot || this.manual.has(id);
     const by = (st: string) => Object.values(reg.shorts).filter((m) => m.status === st && allowed(m.id)).map((m) => m.id).sort();
-    for (const id of [...this.manual]) if (/^(published|queued_buffer|draft_in_buffer)$/.test(reg.shorts[id]?.status ?? '')) this.manual.delete(id);
+    for (const id of [...this.manual]) if (/^(published|published_manual|queued_buffer|draft_in_buffer|uploaded_scheduled|uploaded_private)$/.test(reg.shorts[id]?.status ?? '')) this.manual.delete(id);
 
     // Hawk works independently of Cutter: review what's rendered (or a review that stopped part-way)
     const reviewer: AgentId = 'reviewer';
@@ -143,13 +151,14 @@ export class Pipeline {
       const needDetails = by('approved').find((id) => this.attempt('details', id, 2));
       const retry = Object.values(reg.shorts).filter((m) => m.status === 'publish_failed' && this.manual.has(m.id)).map((m) => m.id);
       const ready = [...by('ready_to_publish'), ...retry].find((id) => (s.youtubeAutoUpload || this.uploadNow.has(id) || this.manual.has(id)) && this.attempt('publish', `${id}v${reg.shorts[id].version ?? 1}`, 2));
-      if (ready && !publishSetupMissing(s)) {
-        void this.publish(ready);
+      if (ready && s.publishVia !== 'manual' && !publishSetupMissing(s)) {
+        void (s.publishVia === 'buffer' ? this.publish(ready) : this.uploadYouTube(ready));
       } else if (needDetails) {
         await this.agents.send(publisher, publisherKickoff(needDetails), `Write upload details for ${needDetails}`, { fresh: true, short: needDetails });
       }
     }
     void this.pollBuffer(reg);
+    void this.pollYouTube(reg);
 
     if (renderBusy()) return;
     const editor: AgentId = 'editor';
@@ -215,7 +224,7 @@ export class Pipeline {
     if (s.youtubeMode === 'scheduled') {
       const taken = new Set(
         Object.values(reg!.shorts)
-          .filter((x) => x.publish_at && x.id !== id && /queued_buffer|published/.test(x.status ?? ''))
+          .filter((x) => x.publish_at && x.id !== id && TAKES_A_DAY.test(x.status ?? ''))
           .map((x) => dayKey(Date.parse(x.publish_at!), s.audienceTimezone)),
       );
       const at = nextSlot(s.audienceTimezone, s.postingTimes, taken);
@@ -247,6 +256,96 @@ export class Pipeline {
     }
     this.onChange();
     setTimeout(() => void this.tick(), 1000);
+  }
+
+  /** YouTube direct: upload from this PC as private, with the day's go-live time when scheduling. */
+  async uploadYouTube(id: string) {
+    const s = loadSettings();
+    const reg = this.registry();
+    const m = reg?.shorts[id];
+    const publisher: AgentId = 'publisher';
+    if (!m?.file) {
+      this.agents.post(publisher, { kind: 'notice', tone: 'warn', text: `${id} has no rendered video recorded, so it can't be uploaded.` });
+      return;
+    }
+    const video = join(outputDir(s.toolkitPath), m.file);
+    const metaFile = join(s.toolkitPath, 'shorts', id, 'publish.json');
+    if (!existsSync(metaFile)) {
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=approved']);
+      return;
+    }
+    let publishAt: string | null = null;
+    let when = 'as private';
+    if (s.youtubeMode === 'scheduled') {
+      const taken = new Set(
+        Object.values(reg!.shorts)
+          .filter((x) => x.publish_at && x.id !== id && TAKES_A_DAY.test(x.status ?? ''))
+          .map((x) => dayKey(Date.parse(x.publish_at!), s.audienceTimezone)),
+      );
+      const at = nextSlot(s.audienceTimezone, s.postingTimes, taken);
+      publishAt = new Date(at).toISOString();
+      when = `to go public ${describeSlot(at, s.audienceTimezone)}`;
+    }
+    this.agents.setCurrentShort(publisher, id);
+    this.agents.setExternal(publisher, `${id} · uploading to YouTube`);
+    this.uploadNow.delete(id);
+    const r = await uploadShort(s.pythonCommand, s.toolkitPath, this.helpers.upload, video, metaFile, s.youtubeMode, publishAt, () => {});
+    this.agents.setExternal(publisher, undefined);
+    if (r.ok && r.videoId) {
+      const status = publishAt ? 'uploaded_scheduled' : 'uploaded_private';
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, `status=${status}`, `youtube_id=${r.videoId}`, ...(publishAt ? [`publish_at=${publishAt}`] : []), 'error=']);
+      await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${id}: uploaded to YouTube`);
+      this.agents.post(publisher, { kind: 'agent', text: `**${id} is on YouTube** ${when}. Open it in YouTube Studio: https://studio.youtube.com/video/${r.videoId}/edit` });
+    } else {
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=publish_failed', `error=${r.message.slice(0, 300)}`]);
+      this.agents.post(publisher, { kind: 'notice', tone: 'error', text: `Upload of ${id} failed: ${r.message}` });
+    }
+    this.onChange();
+    setTimeout(() => void this.tick(), 1000);
+  }
+
+  /** After a scheduled YouTube video's go-live time: check that YouTube really made it public. */
+  private async pollYouTube(reg: Reg) {
+    const s = loadSettings();
+    if (!youtubeStatus(s.toolkitPath).signedIn) return;
+    const now = Date.now();
+    for (const m of Object.values(reg.shorts)) {
+      if (m.status !== 'uploaded_scheduled' || !m.youtube_id || !m.publish_at) continue;
+      if (Date.parse(m.publish_at) > now - 10 * 60_000) continue;
+      if (now - (this.lastPoll.get(m.id) ?? 0) < 30 * 60_000) continue;
+      this.lastPoll.set(m.id, now);
+      const st = await youtubeVideoStatus(s.pythonCommand, s.toolkitPath, this.helpers.status, m.youtube_id);
+      if (!st.ok) continue;
+      if (st.privacy === 'public') {
+        await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=published', `published_at=${m.publish_at}`]);
+        await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${m.id}: published`);
+        this.agents.post('publisher', { kind: 'notice', text: `${m.id} went public on YouTube.` });
+      } else {
+        const msg = `still ${st.privacy} after its go-live time. YouTube may be keeping uploads from your (unverified) Google Cloud project private. Publish it in YouTube Studio, then press "I posted it myself" — or switch Publish via to Buffer.`;
+        await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=publish_failed', `error=${msg.slice(0, 300)}`]);
+        this.agents.post('publisher', { kind: 'notice', tone: 'error', text: `${m.id} is ${msg} https://studio.youtube.com/video/${m.youtube_id}/edit` });
+      }
+      this.onChange();
+    }
+  }
+
+  /** You posted it yourself (or did so before the app existed): record it so nothing re-posts it and its day stays taken. */
+  async markPosted(id: string, whenIso: string | null) {
+    const s = loadSettings();
+    const at = whenIso ? new Date(whenIso).toISOString() : new Date().toISOString();
+    await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=published_manual', `publish_at=${at}`, 'error=']);
+    this.manual.delete(id);
+    this.uploadNow.delete(id);
+    await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${id}: posted by you`);
+    this.onChange();
+  }
+
+  async unmarkPosted(id: string) {
+    const s = loadSettings();
+    const ready = existsSync(join(s.toolkitPath, 'shorts', id, 'publish.json'));
+    await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, `status=${ready ? 'ready_to_publish' : 'approved'}`, 'publish_at=']);
+    await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${id}: not posted yet`);
+    this.onChange();
   }
 
   /** After a post's time has passed, ask Buffer whether it went out (at most every 30 minutes per post). */
@@ -304,6 +403,13 @@ export class Pipeline {
 
 /** What's still missing before the app can post through Buffer (null = ready). */
 export function publishSetupMissing(s: ReturnType<typeof loadSettings>): string | null {
+  if (s.publishVia === 'manual') return null;
+  if (s.publishVia === 'youtube') {
+    const y = youtubeStatus(s.toolkitPath);
+    if (!y.hasClientSecret) return 'choose your Google client_secret.json in Settings → Publishing.';
+    if (!y.signedIn) return 'sign in to YouTube in Settings → Publishing.';
+    return null;
+  }
   if (!getSecret('buffer')) return 'add your Buffer API key in Settings → Publishing.';
   if (!s.bufferChannelId) return 'pick your YouTube channel in Settings → Publishing.';
   if (s.mediaHost === 'r2' ? !(s.r2Account && s.r2Bucket && s.r2KeyId && s.r2PublicBase && getSecret('r2Secret')) : !(s.cloudinaryCloud && s.cloudinaryKey && getSecret('cloudinarySecret'))) {

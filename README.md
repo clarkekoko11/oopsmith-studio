@@ -11,19 +11,23 @@ list in `shorts/<ID>/review.md` → Cutter fixes those shots → re-render as v2
 approves unless it's badly broken and lists the rest under "Needs your eye". A failed render goes back to
 Cutter with the error (up to 2 fixes per Short).
 
-**Publishing (Pip + Buffer):** an `approved` Short goes to Pip, who writes `shorts/<ID>/publish.json` + `publish.md`
-(title, 3 alternatives, description with the verified facts, a question and hashtags; your skill's step 7b rules) →
-`ready_to_publish` → the app puts the video on your video host (Cloudinary or Cloudflare R2, because Buffer fetches
-videos from a public link) and creates a YouTube Short post in Buffer → `queued_buffer` (one Short per day, each on
-the next free day at that weekday's best time in your audience's time zone; default US Eastern: Mon 6 PM, Tue 7 PM,
-Wed 6 PM, Thu 7 PM, Fri 4 PM, Sat 6 PM, Sun 5 PM — from Buffer's and SocialPilot's 2026 studies) or
-`draft_in_buffer` → after the time passes the app asks Buffer and marks it `published` (or `publish_failed` with
-Buffer's error; press "Try Buffer again" on the review screen).
+**Publishing (Pip):** an `approved` Short goes to Pip, who writes `shorts/<ID>/publish.json` + `publish.md` (title,
+3 alternatives, description with the verified facts, a question and hashtags, tags) → `ready_to_publish`. Then, by
+**Settings → Publishing → Publish via** (switch any time):
+- **YouTube direct** (default, free): uploads from this PC as private with an exact go-live time → `uploaded_scheduled`;
+  YouTube makes it public then, even with the PC off. After that time the app checks the video really went public →
+  `published`, or `publish_failed` if YouTube kept it private (some unverified Google Cloud projects are held private).
+  Setup: Google Cloud OAuth client (Desktop app, YouTube Data API v3) → choose client_secret.json → Sign in.
+- **Buffer**: puts the video on your video host (Cloudinary or Cloudflare R2 — Buffer only takes public links), then
+  creates a YouTube Short post in Buffer → `queued_buffer` → `published`. Setup: Buffer API key, YouTube channel in
+  Buffer, video host keys.
+- **I post them myself**: nothing is posted automatically; Pip's details are on the review screen to copy.
 
-Set up once in Settings → Publishing: (1) Buffer API key (Buffer → Settings → API; the Free plan includes one);
-(2) pick your YouTube channel (connect it inside Buffer first); (3) video host — Cloudinary (cloud name, API key,
-API secret) or Cloudflare R2 (account ID, bucket, access key, secret, public bucket URL). Keys are encrypted on this
-PC. Saving the Buffer key turns off the render worker's own YouTube upload, so posts only go out after review.
+One Short per day either way: each goes on the next free day at that weekday's best time in your audience's time zone
+(default US Eastern: Mon 6 PM, Tue 7 PM, Wed 6 PM, Thu 7 PM, Fri 4 PM, Sat 6 PM, Sun 5 PM — Buffer's and SocialPilot's
+2026 studies). **Posted one yourself** (now or before the app existed)? Open it on the review screen and press
+**I posted it myself** with the date: it becomes `published_manual`, is never posted again, and its day counts in the
+schedule. "Not posted after all" undoes it.
 
 **Review screen:** click the TV on the back wall (or 🎬 Review in the top bar) to watch any render, read
 Hawk's review and the tokens each desk used, and Approve or Request changes yourself — your call overrides

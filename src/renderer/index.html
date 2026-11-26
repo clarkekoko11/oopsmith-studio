@@ -69,9 +69,10 @@
             <div id="reviewText" class="msg agent"></div>
             <div id="publishBox" hidden>
               <div id="publishText" class="msg agent"></div>
-              <div class="field"><button class="ghost" id="uploadBtn">Schedule in Buffer</button><a id="studioLink" class="ghost linkbtn" href="https://publish.buffer.com" target="_blank" rel="noreferrer" hidden>Open Buffer</a></div>
+              <div class="field"><button class="ghost" id="uploadBtn">Publish now</button><a id="bufferLink" class="ghost linkbtn" href="https://publish.buffer.com" target="_blank" rel="noreferrer" hidden>Open Buffer</a><a id="studioLink" class="ghost linkbtn" target="_blank" rel="noreferrer" hidden>Open in YouTube Studio</a></div>
             </div>
             <div id="reviewUsage"></div>
+            <div class="posted" id="postedBox"><span class="muted small">Posted it yourself?</span><input id="postedAt" type="datetime-local" /><button class="ghost" id="markPosted">I posted it myself</button><button class="ghost" id="unmarkPosted" hidden>Not posted after all</button></div>
             <textarea id="reviewNotes" rows="3" placeholder="Your notes (needed to request changes)"></textarea>
             <div class="field"><button id="approveBtn">Approve</button><button class="ghost" id="changesBtn">Request changes</button></div>
             <p class="muted small" id="reviewMsg"></p>
@@ -130,8 +131,24 @@
       </section>
 
       <section>
-        <h3>Publishing with Buffer <span class="muted small" id="pubState"></span></h3>
-        <p class="muted small">Pip writes the details; the app puts the video online and schedules it as a YouTube Short in your Buffer account: one a day at the best time, or as a draft you schedule yourself. Connect your YouTube channel inside Buffer first.</p>
+        <h3>Publishing <span class="muted small" id="pubState"></span></h3>
+        <div class="two">
+          <label>Publish via (switch any time)
+            <select id="publishVia">
+              <option value="youtube">YouTube direct (upload from this PC)</option>
+              <option value="buffer">Buffer (needs a video host)</option>
+              <option value="manual">I post them myself</option>
+            </select>
+          </label>
+        </div>
+        <div id="pubYouTube">
+          <p class="muted small">Uploads from this PC as private with a go-live time; YouTube makes it public then, even if your PC is off. Free. One-time setup: in Google Cloud Console enable "YouTube Data API v3", create an OAuth client of type <b>Desktop app</b>, download its JSON (AUTOMATION.md step 4). After the first go-live time the app checks the video really went public.</p>
+          <div class="field"><button class="ghost" id="ytSecret">1. Choose client_secret.json…</button><button class="ghost" id="ytSignIn">2. Sign in to YouTube</button></div>
+          <pre id="ytLog" hidden></pre>
+        </div>
+        <div id="pubManual" hidden><p class="muted small">Pip still writes the title, description and tags for every approved Short (see the review screen). Post it however you like, then press <b>I posted it myself</b> on the review screen so the daily schedule keeps that day.</p></div>
+        <div id="pubBuffer" hidden>
+        <p class="muted small">The app puts the video online and schedules it as a YouTube Short in your Buffer account. Connect your YouTube channel inside Buffer first.</p>
         <label class="small muted" for="bufferKey">1. Buffer API key (Buffer → Settings → API, or publish.buffer.com/settings/api)</label>
         <div class="field"><input id="bufferKey" type="password" autocomplete="off" placeholder="Paste your Buffer API key" /><button class="ghost" id="saveBufferKey">Save</button></div>
         <label class="small muted" for="bufferChannel">2. YouTube channel in Buffer</label>
@@ -150,11 +167,13 @@
           <label>Secret access key <span class="field"><input id="r2Secret" type="password" autocomplete="off" placeholder="saved secrets stay hidden" /><button class="ghost" data-secret="r2Secret">Save</button></span></label>
           <label>Public bucket URL <input id="r2PublicBase" placeholder="https://pub-xxxx.r2.dev" /></label>
         </div>
+        </div>
+        <div id="pubSchedule">
         <div class="two">
           <label>After approval
             <select id="ytMode">
               <option value="scheduled">Schedule: one Short a day at the best time</option>
-              <option value="private">Save as a draft in Buffer (I schedule it)</option>
+              <option value="private">Private on YouTube / draft in Buffer (I publish)</option>
             </select>
           </label>
           <label>Main audience time zone
@@ -179,7 +198,8 @@
         <p class="muted small">Posting time per day, in the audience's time zone. Defaults come from Buffer's and SocialPilot's 2026 studies (Shorts do best late afternoon/evening; Friday is strongest). Check YouTube Studio → Analytics → Audience → "When your viewers are on YouTube" after a few weeks and adjust.</p>
         <div class="times" id="ytTimes"></div>
         <div class="field"><button class="ghost" id="ytResetTimes">Reset to researched times</button><span class="muted small" id="ytNext"></span></div>
-        <label class="small"><input type="checkbox" id="ytAuto" /> Schedule automatically after Hawk approves (otherwise press "Schedule in Buffer" on the review screen)</label>
+        <label class="small"><input type="checkbox" id="ytAuto" /> Publish automatically after Hawk approves (otherwise press "Publish now" on the review screen)</label>
+        </div>
         <p class="muted small" id="pubMsg"></p>
       </section>
 

@@ -31,6 +31,7 @@ function defaults(): Stored {
     youtubeAutoUpload: true,
     youtubeMode: 'scheduled',
     youtubeHour: 18,
+    publishVia: 'youtube',
     bufferChannelId: '',
     bufferChannelName: '',
     youtubeCategory: '24',
