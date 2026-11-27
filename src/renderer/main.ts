@@ -82,12 +82,26 @@ $('#autopilot').addEventListener('click', async () => {
 $('#autopilotBox').addEventListener('change', async (e) => showAutopilot((await api.saveSettings({ autopilot: (e.target as HTMLInputElement).checked })).autopilot));
 $('#dailyTime').addEventListener('change', (e) => api.saveSettings({ dailyTime: (e.target as HTMLInputElement).value }));
 $('#runToday').addEventListener('click', async () => {
+  const s = await api.getSettings();
+  if (s.runAllTeams && teams.length > 1) return toast("Making today's Shorts", await api.runDailyAll());
   const r = await api.runDaily(active);
   if (r !== 'started') toast('Not started', r === 'busy' ? 'Scripty is busy right now.' : r);
 });
+$('#runAllTeams').addEventListener('change', async (e) => { await api.saveSettings({ runAllTeams: (e.target as HTMLInputElement).checked }); runAllTeams = (e.target as HTMLInputElement).checked; updateRunButton(); });
+/** With "every team" on, the button works while any team's Scripty is free; otherwise it follows the active team. */
+let runAllTeams = true;
+function updateRunButton() {
+  const b = $('#runToday') as HTMLButtonElement;
+  const busy = (t: TeamId) => { const sw = teamAgents(t).find((a) => a.id === 'script-writer'); return !!sw && (sw.status === 'working' || sw.status === 'needs-you'); };
+  const all = runAllTeams && teams.length > 1;
+  b.disabled = all ? teams.every((t) => busy(t.id)) : busy(active);
+  b.title = all ? `Every team makes a Short (${teams.map((t) => t.name).join(', ')}); teams sharing a toolkit take turns choosing their story` : `Scripty${teams.length > 1 ? ` (${teamName(active)})` : ''} makes today's Short from start to finish`;
+  b.querySelector('span')!.textContent = all ? "Make today's Shorts" : "Make today's Short";
+}
+void api.getSettings().then((s) => { runAllTeams = s.runAllTeams; updateRunButton(); });
 
 function refreshAgent(team: TeamId, a: AgentInfo) {
-  if (a.id === 'script-writer' && team === active) ($('#runToday') as HTMLButtonElement).disabled = a.status === 'working' || a.status === 'needs-you';
+  if (a.id === 'script-writer') updateRunButton();
   office.setAgentInfo(team, a.id, a.name, a.role, a.status, a.activity);
   if (isOpen(team, a.id)) {
     $('#chat .status').textContent = a.status === 'offline' ? 'not here yet' : a.activity && a.status !== 'idle' ? a.activity : a.status;
@@ -385,6 +399,7 @@ async function openSettings(section?: string) {
   ($('#trayOnMinimize') as HTMLInputElement).checked = s.trayOnMinimize;
   ($('#closeToTray') as HTMLInputElement).checked = s.closeToTray;
   ($('#startWithWindows') as HTMLInputElement).checked = s.startWithWindows;
+  ($('#runAllTeams') as HTMLInputElement).checked = s.runAllTeams;
   renderDays($('#setDays'), s.postingDays);
   void api.folders().then((f) => { ($('#renderDir') as HTMLInputElement).value = f.render; ($('#weeksDir') as HTMLInputElement).value = f.weeks; });
   renderFame();
@@ -899,9 +914,7 @@ function setActive(team: TeamId) {
   chip.hidden = false;
   chip.querySelector('b')!.textContent = teamName(team);
   chip.style.setProperty('--team', TEAM_ACCENTS[i % TEAM_ACCENTS.length]);
-  const sw = teamAgents(team).find((a) => a.id === 'script-writer');
-  ($('#runToday') as HTMLButtonElement).disabled = !!sw && (sw.status === 'working' || sw.status === 'needs-you');
-  ($('#runToday') as HTMLButtonElement).title = `Scripty${teams.length > 1 ? ` (${teamName(team)})` : ''} makes today's Short from start to finish`;
+  updateRunButton();
   if (changed) {
     reviewing = null;
     void api.listShorts(team).then((r) => (boardRows = r));

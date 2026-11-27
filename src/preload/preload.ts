@@ -33,6 +33,7 @@ const api: StudioApi = {
   onPipelineBlocked: (cb) => on('pipeline:blocked', cb),
   appVersion: () => ipcRenderer.invoke('app:version'),
   runDaily: (team) => ipcRenderer.invoke('agents:daily', team),
+  runDailyAll: () => ipcRenderer.invoke('agents:daily-all'),
   getHistory: (team, a) => ipcRenderer.invoke('agents:history', team, a),
   send: (team, a, t) => ipcRenderer.invoke('agents:send', team, a, t),
   stop: (team, a) => ipcRenderer.invoke('agents:stop', team, a),

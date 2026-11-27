@@ -222,6 +222,8 @@ export interface Settings {
   closeToTray: boolean;
   /** start with Windows, straight into the tray */
   startWithWindows: boolean;
+  /** "Make today's Short" starts every team (false = only the team you're looking at) */
+  runAllTeams: boolean;
 }
 
 export interface UpdateInfo {
@@ -305,6 +307,8 @@ export interface StudioApi {
   appVersion(): Promise<string>;
   /** 'started', 'busy', 'quota' or why not */
   runDaily(team: TeamId): Promise<string>;
+  /** every team makes a Short (teams sharing a toolkit take turns choosing their story); returns a summary line */
+  runDailyAll(): Promise<string>;
   getHistory(team: TeamId, agent: AgentId): Promise<ChatItem[]>;
   send(team: TeamId, agent: AgentId, text: string): Promise<void>;
   stop(team: TeamId, agent: AgentId): Promise<void>;

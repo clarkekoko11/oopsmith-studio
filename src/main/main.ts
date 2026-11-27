@@ -600,6 +600,21 @@ app.whenReady().then(() => {
   setTimeout(() => void checkUpdates(), 8000);
   setInterval(() => void checkUpdates(), 3 * 60 * 60 * 1000);
   ipcMain.handle('agents:daily', (_e, team: TeamId) => runDaily(team, 'manual'));
+  // every team makes a Short now: teams that have to wait (sharing a toolkit, or Scripty still busy) start by themselves
+  ipcMain.handle('agents:daily-all', async () => {
+    const started: string[] = [], waiting: string[] = [], not: string[] = [];
+    for (const t of listTeams()) {
+      const r = await runDaily(t.id, 'manual', undefined, { waitTurn: true });
+      if (r === 'started') started.push(t.name);
+      else if (r === 'busy') { queued.set(t.id, Date.now()); waiting.push(t.name); }
+      else not.push(`${t.name}: ${r}`);
+    }
+    const parts = [];
+    if (started.length) parts.push(`${started.join(' and ')} started.`);
+    if (waiting.length) parts.push(`${waiting.join(' and ')} ${waiting.length === 1 ? 'starts' : 'start'} as soon as ${waiting.length === 1 ? 'its' : 'their'} Scripty is free to pick a story.`);
+    if (not.length) parts.push(not.join(' '));
+    return parts.join(' ') || 'Nothing to start.';
+  });
   ipcMain.handle('agents:history', (_e, team: TeamId, id: AgentId) => crew(team).agents.history(id));
   ipcMain.handle('agents:send', (_e, team: TeamId, id: AgentId, text: string) => crew(team).agents.send(id, text));
   ipcMain.handle('agents:stop', (_e, team: TeamId, id: AgentId) => crew(team).agents.stop(id));
@@ -826,13 +841,21 @@ let quotaNoticeDay = '';
 /** 'started', 'busy' (Scripty is working), or why it didn't start. */
 /** Backlog cards handed to a team's Scripty and not used yet (so two teams never take the same story). */
 const cardTaken = new Map<string, TeamId>();
-async function runDaily(team: TeamId, reason: 'manual' | 'schedule', cardId?: string): Promise<string> {
+/** "Make today's Short" for every team: teams waiting their turn (queued at), started within 30 minutes */
+const queued = new Map<TeamId, number>();
+setInterval(() => {
+  for (const [t, at] of [...queued]) {
+    if (!listTeams().some((x) => x.id === t) || Date.now() - at > 30 * 60_000) { queued.delete(t); continue; }
+    void runDaily(t, 'manual', undefined, { waitTurn: true }).then((r) => { if (r !== 'busy') queued.delete(t); });
+  }
+}, 10_000);
+async function runDaily(team: TeamId, reason: 'manual' | 'schedule', cardId?: string, opts: { waitTurn?: boolean } = {}): Promise<string> {
   const { agents } = crew(team);
   if (!agents.isIdle('script-writer')) return 'busy';
   // teams sharing the toolkit take turns choosing a story: wait while another team's Scripty is still picking his
   // (working, but no Short ID yet), so two of them never pick the same one
   const picking = listTeams().find((t) => t.id !== team && sameToolkit(t.id, team) && !crew(t.id).agents.isIdle('script-writer') && !crew(t.id).agents.currentWork('script-writer'));
-  if (picking && !cardId) return reason === 'schedule' ? 'busy' : `${picking.name}'s Scripty is choosing a story right now (you share a toolkit). Try again in a minute.`;
+  if (picking && !cardId) return reason === 'schedule' || opts.waitTurn ? 'busy' : `${picking.name}'s Scripty is choosing a story right now (you share a toolkit). Try again in a minute.`;
   const paused = pausedReason(team, listTeams());
   if (paused && reason === 'schedule') return `Waiting: ${paused}`;
   const s = loadSettings();

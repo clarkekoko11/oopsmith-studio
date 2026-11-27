@@ -64,6 +64,7 @@ function defaults(): Stored {
     trayOnMinimize: true,
     closeToTray: true,
     startWithWindows: false,
+    runAllTeams: true,
   };
 }
 

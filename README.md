@@ -86,7 +86,7 @@ empty when adding a team; a separate repo is still possible). Each Short records
 (and never get the same backlog card), and only the first team refills the backlog. The registry is locked while it's
 written and git commits take turns, so the teams don't overwrite each other. Renders take turns on your graphics card and uploads take turns too. Every extra team uses your Claude
 plan faster. The top bar, review screen and Settings → Toolkit act on the active team (click an agent or a team's
-review screen to switch). The daily run starts a Short for every team. Removing a team stops its desks; its toolkit
+review screen to switch). The daily run starts a Short for every team, and so does **Make today's Shorts** (Settings → Autopilot: switch it to only the team you're looking at). Removing a team stops its desks; its toolkit
 clone and chats stay on the PC. The main team keeps the original settings, chats and folders.
 
 **A Claude account per team:** Settings → Account → **More Claude accounts** → Add account → **Sign in** (a terminal opens:
