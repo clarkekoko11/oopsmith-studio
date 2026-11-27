@@ -216,6 +216,12 @@ export interface Settings {
   dayNight: boolean;
   /** highest studio milestone already announced */
   milestoneSeen: number;
+  /** minimizing hides the window to the system tray (by the clock) instead of the taskbar */
+  trayOnMinimize: boolean;
+  /** closing the window keeps the studio running in the tray (Quit from the tray icon to stop it) */
+  closeToTray: boolean;
+  /** start with Windows, straight into the tray */
+  startWithWindows: boolean;
 }
 
 export interface UpdateInfo {
@@ -365,4 +371,8 @@ export interface StudioApi {
   onGuard(cb: (g: GuardState[]) => void): () => void;
   getGuard(): Promise<GuardState[]>;
   onCelebrate(cb: (c: CelebrateEvent) => void): () => void;
+  /** the window was hidden to the tray (false) or shown again (true) */
+  onVisible(cb: (v: boolean) => void): () => void;
+  /** settings changed outside the window (e.g. Autopilot from the tray menu) */
+  onSettingsChanged(cb: () => void): () => void;
 }

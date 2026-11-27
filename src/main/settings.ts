@@ -61,6 +61,9 @@ function defaults(): Stored {
     mainProfile: '',
     dayNight: true,
     milestoneSeen: 0,
+    trayOnMinimize: true,
+    closeToTray: true,
+    startWithWindows: false,
   };
 }
 

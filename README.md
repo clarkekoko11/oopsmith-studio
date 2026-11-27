@@ -25,6 +25,11 @@ the lounge rug and dance, the busy ones wave from their desks, and confetti come
 too. The Hall of Fame board in the lounge counts the Shorts that are out and unlocks upgrades: a gold plaque (1), the
 neon OOPS sign over the arcades (7), trophy cups (25), a disco ball over the record corner (50) and the gold record (100).
 
+**Running in the tray:** minimizing or closing the window hides the studio in the tray (the icons by the clock); it keeps
+working there (the daily run, renders, reminders) and the 3D office stops drawing so the graphics card is free. Click the
+tray icon to open it, right-click → **Quit** to stop it. **Start with Windows** puts it straight into the tray after a
+restart, so the early-morning run still happens. All three are in Settings → Studio.
+
 ## Weekly uploads (you post the Shorts yourself)
 **Settings → Publishing → Publish via** is **I post them myself** (the default). Every Short that's approved and has
 Pip's upload details is **moved into its week's folder** with a text file of everything to paste into YouTube Studio:
@@ -138,7 +143,7 @@ The app never sees your Claude password or token.
 ## Updates
 The app checks GitHub Releases when it starts and every 3 hours, and downloads a new version quietly in the
 background. When it's ready, a green **⬆ Update ready** chip appears in the top bar (also Settings → App
-updates). Click it to install and restart, or just close the app and the update installs then. Settings,
+updates). Click it to install and restart, or quit the app from the tray icon and the update installs then. Settings,
 chats, keys and your Claude login are kept (they live in `%APPDATA%\Oopsmith Studio`).
 
 **Publishing a new version (for the maintainer):** bump `version` in `package.json`, commit and push, then

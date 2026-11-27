@@ -93,6 +93,8 @@ const api: StudioApi = {
   onGuard: (cb) => on('guard', cb),
   getGuard: () => ipcRenderer.invoke('guard:get'),
   onCelebrate: (cb) => on('celebrate', cb),
+  onVisible: (cb) => on('window:visible', cb),
+  onSettingsChanged: (cb) => on('settings:changed', cb),
 };
 
 contextBridge.exposeInMainWorld('studio', api);

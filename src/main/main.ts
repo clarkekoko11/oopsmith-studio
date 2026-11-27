@@ -1,5 +1,5 @@
 // Electron main process: window, IPC, settings, account check and agents.
-import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, net, protocol, shell, Tray } from 'electron';
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { existsSync, readFileSync } from 'node:fs';
@@ -38,6 +38,50 @@ let account: AccountState = { checked: false, signedIn: false, apiKeyInEnv: fals
 const accounts = new Map<string, AccountState>();
 // Windows shows notifications under this name
 app.setAppUserModelId('com.oopsmith.studio');
+// one studio at a time: opening it again brings the running one back (e.g. from the tray)
+if (!app.requestSingleInstanceLock()) app.exit(0);
+app.on('second-instance', () => showWindow());
+/** set when you really quit (tray → Quit, or an update restarting), so closing isn't turned into hiding */
+let quitting = false;
+app.on('before-quit', () => { quitting = true; });
+let tray: Tray | undefined;
+let trayHintShown = false;
+function showWindow() {
+  if (!win) return;
+  if (win.isMinimized()) win.restore();
+  win.show();
+  win.focus();
+}
+/** Hide to the tray; the agents, the daily run and reminders keep going. */
+function hideToTray() {
+  if (!win || !tray) return false;
+  win.hide();
+  if (!trayHintShown) {
+    trayHintShown = true;
+    void notify('Oopsmith Studio is still running', 'It is in the tray by the clock, so the daily run and reminders keep going. Click the icon to open it, or right-click → Quit.', 'info');
+  }
+  return true;
+}
+function buildTray() {
+  const icon = nativeImage.createFromPath(join(here, 'renderer', 'assets', 'brand', 'mark.png')).resize({ width: 32, height: 32 });
+  tray = new Tray(icon);
+  tray.setToolTip('Oopsmith Studio');
+  const menu = () => Menu.buildFromTemplate([
+    { label: 'Open Oopsmith Studio', click: showWindow },
+    { label: "Make today's Short", click: () => void runDaily(MAIN_TEAM, 'manual') },
+    { type: 'checkbox', label: 'Autopilot', checked: loadSettings().autopilot, click: (i) => { saveSettings({ autopilot: i.checked }); send('settings:changed', null); } },
+    { type: 'separator' },
+    { label: 'Quit (stops the agents)', click: () => { quitting = true; app.quit(); } },
+  ]);
+  tray.on('click', showWindow);
+  tray.on('right-click', () => tray?.popUpContextMenu(menu()));
+  tray.setContextMenu(null);
+}
+/** Start with Windows (installed app only), into the tray. */
+function applyLoginItem() {
+  if (!app.isPackaged || process.platform !== 'win32') return;
+  app.setLoginItemSettings({ openAtLogin: loadSettings().startWithWindows, args: ['--hidden'] });
+}
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'toolkit', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
@@ -299,6 +343,8 @@ function createWindow() {
     backgroundColor: '#1b1d29',
     title: 'Oopsmith Studio',
     autoHideMenuBar: true,
+    // started with Windows: straight into the tray
+    show: !process.argv.includes('--hidden'),
     webPreferences: {
       preload: join(here, 'preload.cjs'),
       contextIsolation: true,
@@ -307,6 +353,17 @@ function createWindow() {
     },
   });
   win.loadFile(join(here, 'renderer', 'index.html'));
+  // minimize / close go to the tray (Settings → Studio), so the studio keeps working
+  win.on('minimize', () => {
+    if (loadSettings().trayOnMinimize) hideToTray();
+  });
+  win.on('close', (e) => {
+    if (!quitting && loadSettings().closeToTray && hideToTray()) e.preventDefault();
+  });
+  // the 3D office stops drawing while hidden (the graphics card is free for renders)
+  win.on('hide', () => send('window:visible', false));
+  win.on('show', () => send('window:visible', true));
+  win.on('restore', () => send('window:visible', true));
   win.webContents.setWindowOpenHandler(({ url }) => {
     if (/^https?:\/\//.test(url)) shell.openExternal(url);
     return { action: 'deny' };
@@ -521,6 +578,7 @@ app.whenReady().then(() => {
   };
   ipcMain.handle('update:check', checkUpdates);
   ipcMain.handle('update:apply', async () => {
+    quitting = true; // let the update close the window for real
     for (const c of crews.values()) c.agents.closeAll();
     const r = await applyUpdate((step) => send('update', { available: true, behind: 0, changes: [], busy: step }));
     if (!r.ok) send('update', { available: true, behind: 0, changes: [], error: r.message });
@@ -576,6 +634,7 @@ app.whenReady().then(() => {
 
   ipcMain.handle('settings:get', () => loadSettings());
   ipcMain.handle('settings:save', (_e, patch: Partial<Settings>) => {
+    if ('startWithWindows' in patch) setTimeout(applyLoginItem, 0);
     // a new daily time that has already passed today starts tomorrow, not right now
     // (catching up stays for when the app was closed at the set time)
     if (typeof patch.dailyTime === 'string' && /^\d{1,2}:\d{2}$/.test(patch.dailyTime)) {
@@ -710,6 +769,8 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+  buildTray();
+  applyLoginItem();
   setTimeout(() => void autoDetectRendering(), 5000);
   if (process.env.OOPSMITH_SMOKE) {
     win!.webContents.on('console-message', (e) => console.log('[renderer]', (e as unknown as { message: string }).message));

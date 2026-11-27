@@ -5,7 +5,7 @@ export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
   const hist: Record<string, ChatItem[]> = { 'script-writer': [] };
   let settings: Settings = { toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit', publishVia: 'youtube', toolkitPath: 'C:\\Users\\you\\roblox-shorts-toolkit', scriptWriterModel: 'sonnet', editorModel: 'sonnet', reviewerModel: 'sonnet', pythonCommand: 'python', hasGeminiKey: true, cameraMode: 'topdown', autopilot: true, dailyTime: '09:00', lastDailyRun: '', renderReady: false, publisherModel: 'sonnet', youtubeAutoUpload: true, youtubeMode: 'scheduled', youtubeHour: 18, bufferChannelId: 'c1', bufferChannelName: 'Oopsmith (YouTube)', youtubeCategory: '24', mediaHost: 'cloudinary', cloudinaryCloud: 'oopsmith', cloudinaryKey: '1234', r2Account: '', r2Bucket: '', r2KeyId: '', r2PublicBase: '', audienceTimezone: 'America/New_York', postingTimes: { mon: '18:00', tue: '19:00', wed: '18:00', thu: '19:00', fri: '16:00', sat: '18:00', sun: '17:00' }, mainTeamName: 'Team Oopsmith', teams: [], effort: { 'script-writer': 'high', editor: 'high', reviewer: 'medium', publisher: 'low' },
-    settingsVersion: 2, postingDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], weekOneStart: '2026-11-23', renderDir: '', weeksDir: '', budgetGuard: 0.8, notifyDesktop: true, ntfyTopic: '', remindMinutes: 120, backlogAuto: true, profiles: [{ id: 'second', name: 'second@example.com' }], mainProfile: '', dayNight: true, milestoneSeen: 1 };
+    settingsVersion: 2, postingDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'], weekOneStart: '2026-11-23', renderDir: '', weeksDir: '', budgetGuard: 0.8, notifyDesktop: true, ntfyTopic: '', remindMinutes: 120, backlogAuto: true, profiles: [{ id: 'second', name: 'second@example.com' }], mainProfile: '', dayNight: true, milestoneSeen: 1, trayOnMinimize: true, closeToTray: true, startWithWindows: false };
   settings.publishVia = 'manual';
   settings.scriptWriterModel = settings.editorModel = settings.reviewerModel = settings.publisherModel = 'opus';
   const entry = (id: string, title: string, day: string, week: number, posted = false): PlanEntry => ({ team: 'main', id, title, day, at: `${day}T23:00:00Z`, week, version: 1, video: `C:\\Users\\you\\Videos\\Oopsmith weeks\\Week 0${week}\\${day} - ${id}.mp4`, posted });
@@ -147,6 +147,8 @@ export function mockApi(): StudioApi {
     onProfiles: () => () => {},
     onGuard: (cb) => { if (extra > 0) setTimeout(() => cb([{ team: 'main', paused: null }, { team: 'team-2', paused: 'the Claude plan is at 84%, so Team Oopsmith gets to finish first. This team carries on at 3:40 PM.' }]), 700); return () => {}; },
     getGuard: async () => [],
+    onVisible: () => () => {},
+    onSettingsChanged: () => () => {},
     onCelebrate: (cb) => { if (new URLSearchParams(location.search).has('celebrate')) setTimeout(() => cb({ team: 'main', id: 'RS-0004', title: 'The Comma That Cost a Dairy $5 Million', kind: 'posted', text: 'RS-0004 is out: The Comma That Cost a Dairy $5 Million' }), 1500); return () => {}; },
   };
 }

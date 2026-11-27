@@ -221,6 +221,11 @@ export class Office {
   }
 
   // ---------- time of day, backlog, milestones, celebrations
+  /** Stop drawing while the window is hidden in the tray; pick up again when it's shown. */
+  setPaused(paused: boolean) {
+    this.renderer.setAnimationLoop(paused ? null : () => this.frame());
+    for (const v of this.videos.values()) { if (paused) v.pause(); else void v.play().catch(() => {}); }
+  }
   /** Follow the real time of day (on), or keep the warm late-afternoon look (off). */
   setDayNight(on: boolean) {
     this.dayNight = on;
@@ -451,6 +456,48 @@ export class Office {
     if (!line) return;
     const p = this.nav.path(this.pos.x, this.pos.z, 0, line.z0 + 10.4);
     if (p) { this.path = p; this.goalAgent = null; }
+  }
+  /**
+   * Layout check (for tests): wall pictures that overlap each other, and furniture that stands in front of a
+   * wall picture or overlaps other furniture. Returns plain text lines.
+   */
+  debugAudit(): string[] {
+    const out: string[] = [];
+    const w = this.world;
+    const trims = new Set(w.walls.flatMap((x) => x.trims));
+    const walls = new Set<THREE.Object3D>(w.walls.map((x) => x.mesh));
+    const box = (o: THREE.Object3D) => new THREE.Box3().setFromObject(o);
+    const fmt = (b: THREE.Box3) => `x ${b.min.x.toFixed(1)}..${b.max.x.toFixed(1)} y ${b.min.y.toFixed(1)}..${b.max.y.toFixed(1)} z ${b.min.z.toFixed(1)}..${b.max.z.toFixed(1)}`;
+    const pics = [...trims].filter((t) => (t as THREE.Mesh).geometry?.type === 'PlaneGeometry' || (t as THREE.Mesh).geometry?.type === 'BoxGeometry');
+    // pictures on the same wall that overlap
+    for (const wall of w.walls) {
+      const ps = wall.trims.filter((t) => (t as THREE.Mesh).geometry?.type === 'PlaneGeometry');
+      for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) {
+        const a = box(ps[i]).expandByScalar(0.05), b = box(ps[j]);
+        if (a.intersectsBox(b)) out.push(`WALL OVERLAP: ${fmt(box(ps[i]))}  &  ${fmt(b)}`);
+      }
+    }
+    // furniture standing in front of a wall picture (within 2.5 of the wall, taller than the picture's bottom)
+    const furniture = w.root.children.filter((c) => !trims.has(c) && !walls.has(c) && c !== w.ceiling && !(w.pickFloor as THREE.Object3D[]).includes(c) && box(c).max.y > 0.3 && box(c).min.y < 8 && box(c).getSize(new THREE.Vector3()).x < 40);
+    for (const p of pics) {
+      if ((p as THREE.Mesh).geometry?.type !== 'PlaneGeometry') continue;
+      const pb = box(p);
+      const wall = w.walls.find((x) => x.trims.includes(p))!;
+      const zone = pb.clone();
+      if (wall.normal.x) { if (wall.normal.x > 0) zone.max.x += 2.5; else zone.min.x -= 2.5; } else { if (wall.normal.y > 0) zone.max.z += 2.5; else zone.min.z -= 2.5; }
+      for (const f of furniture) {
+        const fb = box(f);
+        if (fb.intersectsBox(zone) && fb.max.y > pb.min.y + 0.15) out.push(`BLOCKS PICTURE: furniture ${fmt(fb)} covers picture ${fmt(pb)}`);
+      }
+    }
+    // floor colliders overlapping each other (walls excluded)
+    const cs = w.colliders.filter((c) => c.maxX - c.minX < 20 && c.maxZ - c.minZ < 20);
+    for (let i = 0; i < cs.length; i++) for (let j = i + 1; j < cs.length; j++) {
+      const a = cs[i], b = cs[j];
+      const ox = Math.min(a.maxX, b.maxX) - Math.max(a.minX, b.minX), oz = Math.min(a.maxZ, b.maxZ) - Math.max(a.minZ, b.minZ);
+      if (ox > 0.2 && oz > 0.2) out.push(`FLOOR OVERLAP: [${a.minX.toFixed(1)}..${a.maxX.toFixed(1)}, ${a.minZ.toFixed(1)}..${a.maxZ.toFixed(1)}] & [${b.minX.toFixed(1)}..${b.maxX.toFixed(1)}, ${b.minZ.toFixed(1)}..${b.maxZ.toFixed(1)}]`);
+    }
+    return out;
   }
   debugTeleport(x: number, z: number, heading: number) {
     this.pos.set(x, 0, z);

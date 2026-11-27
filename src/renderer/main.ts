@@ -382,6 +382,9 @@ async function openSettings(section?: string) {
   ($('#ntfyTopic') as HTMLInputElement).value = s.ntfyTopic;
   ($('#remindMinutes') as HTMLSelectElement).value = String(s.remindMinutes);
   ($('#dayNight') as HTMLInputElement).checked = s.dayNight;
+  ($('#trayOnMinimize') as HTMLInputElement).checked = s.trayOnMinimize;
+  ($('#closeToTray') as HTMLInputElement).checked = s.closeToTray;
+  ($('#startWithWindows') as HTMLInputElement).checked = s.startWithWindows;
   renderDays($('#setDays'), s.postingDays);
   void api.folders().then((f) => { ($('#renderDir') as HTMLInputElement).value = f.render; ($('#weeksDir') as HTMLInputElement).value = f.weeks; });
   renderFame();
@@ -1309,6 +1312,13 @@ api.onCelebrate((c: CelebrateEvent) => {
   toast(title, c.text, 'good');
   void loadBoard();
 });
+
+// ---------------- the tray: pause the 3D office while hidden
+api.onVisible((v) => office.setPaused(!v));
+api.onSettingsChanged(async () => showAutopilot((await api.getSettings()).autopilot));
+for (const id of ['trayOnMinimize', 'closeToTray', 'startWithWindows'] as const) {
+  $(`#${id}`).addEventListener('change', (e) => api.saveSettings({ [id]: (e.target as HTMLInputElement).checked }));
+}
 
 // ---------------- start-up for the new parts
 void (async () => {

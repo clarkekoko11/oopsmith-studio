@@ -778,8 +778,8 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
     g.fillStyle = BRAND.cream; g.font = `500 30px ${TEXT}`;
     ['Flat white ......... 1 oops', 'Cold brew ......... 2 oops', 'Plot-twist tea .... free', 'Re-render latte ... v2'].forEach((l, i) => g.fillText(l, 34, 140 + i * 54));
   });
-  const mb = picture(menu, 4.2, 3.15);
-  mb.position.set(-W + 0.38, 5.6, L + 6.4);
+  const mb = picture(menu, 3.6, 2.7);
+  mb.position.set(-W + 0.38, 5.9, L + 6.7);
   mb.rotation.y = Math.PI / 2;
   add(counter, mb);
   left.trims.push(mb);
@@ -788,12 +788,12 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
   spots.push({ kind: 'coffee', pos: new THREE.Vector3(-W + 4.4, 0, L + 8.0), facing: -Math.PI / 2, action: 'drink', prop: 'mug', taken: null });
   // water cooler
   const cooler = new THREE.Group();
-  cooler.position.set(-W + 1.4, 0, L + 13.2);
+  cooler.position.set(-W + 1.4, 0, L + 11.9);
   cooler.add(mesh(new THREE.BoxGeometry(1.4, 2.6, 1.4), std('#e9edf5', 0.5), 0, 1.3, 0));
   cooler.add(mesh(new THREE.CylinderGeometry(0.55, 0.55, 1.5, 18), new THREE.MeshStandardMaterial({ color: '#6fb3ff', transparent: true, opacity: 0.7, roughness: 0.1 }), 0, 3.35, 0));
   add(cooler);
-  block(-W + 1.4, L + 13.2, 1.8, 1.8);
-  spots.push({ kind: 'cooler', pos: new THREE.Vector3(-W + 3.7, 0, L + 13.2), facing: -Math.PI / 2, action: 'drink', prop: 'cup', taken: null });
+  block(-W + 1.4, L + 11.9, 1.8, 1.8);
+  spots.push({ kind: 'cooler', pos: new THREE.Vector3(-W + 3.7, 0, L + 11.9), facing: -Math.PI / 2, action: 'drink', prop: 'cup', taken: null });
 
   // ---- arcade corner on the right
   const arcadeTex = canvasTex(256, 256, (g) => {
@@ -840,14 +840,14 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
 
   // bookshelf + armchair reading nook (right wall, front)
   const shelf = new THREE.Group();
-  shelf.position.set(W - 1.0, 0, L + 12.6);
-  shelf.add(mesh(new THREE.BoxGeometry(1.4, 5, 5), std('#6a4632', 0.7), 0, 2.5, 0));
+  // low enough to sit under the window, and clear of it
+  shelf.position.set(W - 1.0, 0, L + 14.6);
+  shelf.add(mesh(new THREE.BoxGeometry(1.4, 4.2, 4.0), std('#6a4632', 0.7), 0, 2.1, 0));
   const bookColors = [BRAND.orange, BRAND.sky, BRAND.yellow, BRAND.cream, BRAND.violet, BRAND.plumSoft];
-  for (let r = 0; r < 3; r++) for (let i = 0; i < 8; i++) shelf.add(mesh(new THREE.BoxGeometry(1.0, 1.0 + ((i * 7 + r) % 3) * 0.12, 0.45), std(bookColors[(r * 2 + i) % 6]), -0.3, 0.9 + r * 1.55, -2.0 + i * 0.55));
+  for (let r = 0; r < 3; r++) for (let i = 0; i < 7; i++) shelf.add(mesh(new THREE.BoxGeometry(1.0, 0.95 + ((i * 7 + r) % 3) * 0.1, 0.45), std(bookColors[(r * 2 + i) % 6]), -0.3, 0.75 + r * 1.3, -1.65 + i * 0.55));
   add(shelf);
-  right.trims.push(shelf);
-  block(W - 1.0, L + 12.6, 1.8, 5.2);
-  spots.push({ kind: 'read', pos: new THREE.Vector3(W - 3.2, 0, L + 11.4), facing: Math.PI / 2, action: 'read', prop: 'book', taken: null });
+  block(W - 1.0, L + 14.6, 1.8, 4.2);
+  spots.push({ kind: 'read', pos: new THREE.Vector3(W - 3.3, 0, L + 13.8), facing: Math.PI / 2, action: 'read', prop: 'book', taken: null });
   const chair = new THREE.Group();
   chair.position.set(W - 6.2, 0, L + 14.4);
   chair.rotation.y = -2.5;
@@ -895,18 +895,16 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
     if (water) spots.push({ kind: 'water', pos: new THREE.Vector3(x + water.dx, 0, z + water.dz), facing: Math.atan2(-water.dx, -water.dz), action: 'water', prop: 'can', taken: null });
   };
   plant(-W + 1.8, HD - 1.8, 1.2, { dx: 2.4, dz: -0.6 });
-  plant(W - 1.8, HD - 1.8, 1.2);
+  plant(W - 1.6, L + 8.4, 1.0);
   plant(-6.6, L + 11.2, 0.9, { dx: -0.2, dz: -2.1 });
   plant(6.6, L + 11.2, 0.9, { dx: 0.2, dz: -2.1 });
   plant(-4.8, HD - 1.4, 0.8);
   plant(4.8, HD - 1.4, 0.8);
   // window gazing spots
-  for (const s of [-1, 1]) {
-    windowAt(s * (W - 0.34), L + 3, s < 0 ? Math.PI / 2 : -Math.PI / 2, 4.5, 3.4, 6.4, s < 0 ? left : right);
-    windowAt(s * (W - 0.34), L + 10.5, s < 0 ? Math.PI / 2 : -Math.PI / 2, 4.5, 3.4, 6.4, s < 0 ? left : right);
-  }
-  spots.push({ kind: 'window', pos: new THREE.Vector3(W - 3.6, 0, L + 9.0), facing: Math.PI / 2, action: 'look', taken: null });
-  spots.push({ kind: 'window', pos: new THREE.Vector3(-W + 3.8, 0, L + 11.4), facing: -Math.PI / 2, action: 'look', taken: null });
+  windowAt(-(W - 0.34), L + 2.4, Math.PI / 2, 4.5, 3.4, 6.4, left);
+  windowAt(W - 0.34, L + 10.6, -Math.PI / 2, 4.5, 3.4, 6.4, right);
+  spots.push({ kind: 'window', pos: new THREE.Vector3(W - 3.6, 0, L + 10.6), facing: Math.PI / 2, action: 'look', taken: null });
+  spots.push({ kind: 'window', pos: new THREE.Vector3(-W + 4.4, 0, L + 1.2), facing: -Math.PI / 2 + 0.5, action: 'look', taken: null });
 
   // brand posters: end card + YouTube banner, framed
   const framed = (tex: THREE.Texture, w: number, h: number, x: number, y: number, z: number, rot: number, wall: Wall) => {
@@ -920,8 +918,9 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
     wall.trims.push(f, p);
   };
   framed(brand('end-card.png'), 2.4, 4.27, W - 0.4, 4.8, L + 0.2 + 0.0, -Math.PI / 2, right);
-  framed(brand('banner.png'), 5.4, 3.04, -W + 0.4, 4.8, HD - 3.0, Math.PI / 2, left);
-  framed(brand('thumb-layout.png'), 3.6, 2.03, W - 0.4, 5.0, HD - 3.0, -Math.PI / 2, right);
+  const front = walls.find((x) => x.normal.y === -1)!;
+  framed(brand('banner.png'), 5.4, 3.04, -18.5, 5.2, HD - 0.4, Math.PI, front);
+  framed(brand('thumb-layout.png'), 3.6, 2.03, 16, 5.2, HD - 0.4, Math.PI, front);
 
   // door mat
   const matTex = canvasTex(512, 220, (g) => { g.fillStyle = BRAND.plum; g.fillRect(0, 0, 512, 220); g.fillStyle = BRAND.cream; g.font = `800 64px ${DISPLAY}`; g.textAlign = 'center'; g.fillText('oops, hi!', 256, 132); });
@@ -951,19 +950,22 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
 
   // ---- Hall of Fame: studio upgrades unlocked by how many Shorts are out
   const fameTex = canvasTex(1024, 640, () => {});
+  // hung on the left wall of the lounge, above the water cooler (local +z faces into the room)
   const fame = new THREE.Group();
-  fame.position.set(-16.5, 0, L + 14.6);
-  fame.add(mesh(new THREE.BoxGeometry(7.2, 4.6, 0.35), std(BRAND.plum, 0.6), 0, 3.4, 0));
-  for (const sx of [-3.2, 3.2]) fame.add(mesh(new THREE.BoxGeometry(0.3, 1.2, 0.8), std('#3a2a22', 0.7), sx, 0.6, 0));
-  const famePic = picture(fameTex, 6.8, 4.25);
-  famePic.position.set(0, 3.4, 0.19);
+  fame.position.set(-W + 0.3, 0, L + 11.4);
+  fame.rotation.y = Math.PI / 2;
+  fame.add(mesh(new THREE.BoxGeometry(5.6, 3.6, 0.2), std(BRAND.plum, 0.6), 0, 6.15, 0, false));
+  const famePic = picture(fameTex, 5.3, 3.31);
+  famePic.position.set(0, 6.15, 0.11);
   fame.add(famePic);
+  // a ledge on top for the trophy cups
+  fame.add(mesh(new THREE.BoxGeometry(5.6, 0.12, 0.7), std('#5a3b2a', 0.6), 0, 8.0, 0.3, false));
   // trophy cups on top (25+)
   const cups = new THREE.Group();
   const gold = std('#e9b949', 0.25, { metalness: 0.85 });
   for (let i = 0; i < 3; i++) {
     const cup = new THREE.Group();
-    cup.position.set(-1.6 + i * 1.6, 5.75, 0);
+    cup.position.set(-1.6 + i * 1.6, 8.06, 0.3);
     const sc = i === 1 ? 1.25 : 1;
     cup.add(mesh(new THREE.CylinderGeometry(0.28 * sc, 0.18 * sc, 0.5 * sc, 16), gold, 0, 0.45 * sc, 0, false));
     cup.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3 * sc, 8), gold, 0, 0.1, 0, false));
@@ -972,7 +974,7 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
   }
   fame.add(cups);
   add(fame);
-  block(-16.5, L + 14.6, 7.6, 1.0);
+  left.trims.push(fame);
   // neon OOPS sign above the arcades (7+)
   const neonTex = canvasTex(512, 200, (g) => {
     g.font = `800 150px ${DISPLAY}`;
@@ -986,7 +988,7 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
     g.fillText('OOPS', 256, 160);
   });
   const neon = picture(neonTex, 2.8, 1.1, true);
-  neon.position.set(W - 0.4, 7.25, L + 6.9);
+  neon.position.set(W - 0.4, 6.9, L + 4.6);
   neon.rotation.y = -Math.PI / 2;
   add(neon);
   right.trims.push(neon);
@@ -1053,7 +1055,7 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
     discoLight.intensity = count >= 50 ? 18 : 0;
   };
   setMilestones(0);
-  spots.push({ kind: 'fame', pos: new THREE.Vector3(-15.5, 0, L + 16.0), facing: Math.PI, action: 'look', taken: null });
+  spots.push({ kind: 'fame', pos: new THREE.Vector3(-W + 5.2, 0, L + 13.9), facing: -Math.PI / 2 - 0.35, action: 'look', taken: null });
 
   // ---- the sky outside the windows follows the time of day
   let lastSky = '';
