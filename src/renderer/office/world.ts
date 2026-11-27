@@ -2,7 +2,7 @@
 // order (Script → Edit → Review → Publish, left to right) with its own board and review screen; everyone shares the
 // lounge at the front (coffee bar, sofa, arcade, books, plants), which is where idle agents hang out.
 import * as THREE from 'three';
-import type { AgentId, ShortRow, TeamId } from '../../shared/types';
+import type { AgentId, BacklogCard, ShortRow, TeamId } from '../../shared/types';
 import type { Action, Prop } from './characters';
 
 export interface Collider { minX: number; maxX: number; minZ: number; maxZ: number }
@@ -21,7 +21,7 @@ export interface DeskSpot {
   monitor: THREE.CanvasTexture;
 }
 export interface ActivitySpot {
-  kind: 'coffee' | 'cooler' | 'sofa' | 'beanbag' | 'arcade' | 'read' | 'armchair' | 'water' | 'window' | 'record';
+  kind: 'coffee' | 'cooler' | 'sofa' | 'beanbag' | 'arcade' | 'read' | 'armchair' | 'water' | 'window' | 'record' | 'party' | 'fame';
   pos: THREE.Vector3;
   facing: number;
   action: Action;
@@ -37,9 +37,20 @@ export interface TeamLine {
   z0: number;
   accent: string;
   drawBoard: (rows: ShortRow[]) => void;
+  /** pin the backlog's next stories on Scripty's corkboard */
+  drawCork: (cards: BacklogCard[]) => void;
   tv: THREE.Mesh;
   poster: THREE.Texture;
 }
+
+/** Studio upgrades, unlocked by how many Shorts are out (posted or published). */
+export const MILESTONES = [
+  { at: 1, name: 'First Short plaque' },
+  { at: 7, name: 'Neon OOPS sign' },
+  { at: 25, name: 'Trophy cups' },
+  { at: 50, name: 'Disco ball' },
+  { at: 100, name: 'Gold record' },
+];
 
 // ---- brand (Oopsmith brand guidelines v1.0)
 export const BRAND = {
@@ -185,7 +196,13 @@ export interface World {
   ceiling: THREE.Group;
   room: { w: number; d: number; h: number };
   playerStart: THREE.Vector3;
+  /** where the team gathers to celebrate (middle of the lounge rug) */
+  party: THREE.Vector3;
   update(t: number): void;
+  /** daylight 0 (night) .. 1 (day), warmth 0..1 (sunrise / sunset glow) */
+  setSky(daylight: number, warmth: number): void;
+  /** how many Shorts are out: shows the upgrades unlocked so far */
+  setMilestones(count: number): void;
 }
 
 export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: string }[]): World {
@@ -254,18 +271,25 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
   fl.trims.push(lintel);
 
   // ---- factory windows (steel frame, warm daylight glass)
-  const glassTex = canvasTex(256, 256, (g) => {
+  const drawGlass = (g: CanvasRenderingContext2D, top: string, bottom: string, stars: number) => {
     const grd = g.createLinearGradient(0, 0, 0, 256);
-    grd.addColorStop(0, '#8fb8e8');
-    grd.addColorStop(1, '#f6d9a8');
+    grd.addColorStop(0, top);
+    grd.addColorStop(1, bottom);
     g.fillStyle = grd;
     g.fillRect(0, 0, 256, 256);
+    if (stars > 0) {
+      g.fillStyle = `rgba(255,244,226,${stars})`;
+      for (let i = 0; i < 26; i++) g.fillRect((i * 97) % 250, (i * 53) % 170, i % 4 ? 2 : 3, i % 4 ? 2 : 3);
+      // a small moon in the corner
+      g.beginPath(); g.arc(200, 48, 16, 0, Math.PI * 2); g.fill();
+    }
     g.strokeStyle = BRAND.plum;
     g.lineWidth = 10;
     g.strokeRect(5, 5, 246, 246);
     g.lineWidth = 6;
     for (const p of [85, 171]) { g.beginPath(); g.moveTo(p, 0); g.lineTo(p, 256); g.stroke(); g.beginPath(); g.moveTo(0, p); g.lineTo(256, p); g.stroke(); }
-  });
+  };
+  const glassTex = canvasTex(256, 256, (g) => drawGlass(g, '#8fb8e8', '#f6d9a8', 0));
   const windowAt = (x: number, z: number, rot: number, w: number, h: number, y: number, wall: Wall) => {
     const m = picture(glassTex, w, h);
     m.position.set(x, y, z);
@@ -446,7 +470,10 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
     right.trims.push(tv, tvFrame);
     tv.userData.screen = team.id;
     tvFrame.userData.screen = team.id;
-    lines.push({ team: team.id, name: team.name, z0, accent, drawBoard, tv, poster });
+    let corkDraw: (cards: BacklogCard[]) => void = () => {};
+    let backlogEasel: THREE.Group | null = null;
+    const line: TeamLine = { team: team.id, name: team.name, z0, accent, drawBoard, drawCork: (c) => corkDraw(c), tv, poster };
+    lines.push(line);
 
     // the four desks
     PIPELINE.forEach((agent, si) => {
@@ -518,22 +545,52 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
       // station props
       if (agent === 'script-writer') {
         for (let i = 0; i < 4; i++) g.add(mesh(new THREE.BoxGeometry(0.9, 0.05, 1.2), loader3.paper, -1.2 + i * 0.1, 2.76 + i * 0.05, 0.2 + i * 0.04));
-        // story corkboard on an easel beside the desk
-        const cork = canvasTex(512, 384, (c) => {
+        // story corkboard on an easel beside the desk: the backlog's next stories (click it to open the backlog)
+        const cork = canvasTex(768, 576, () => {});
+        corkDraw = (cards) => {
+          const c = (cork.image as HTMLCanvasElement).getContext('2d')!;
+          c.setLineDash([]);
           c.fillStyle = '#c79a66';
-          c.fillRect(0, 0, 512, 384);
-          const cards = [BRAND.cream, BRAND.yellow, '#ffffff', BRAND.cream, '#ffd9c7', BRAND.yellow];
-          cards.forEach((cc, i) => {
-            const x = 30 + (i % 3) * 160, y = 30 + Math.floor(i / 3) * 175;
-            c.save(); c.translate(x + 65, y + 70); c.rotate(((i * 37) % 9 - 4) * 0.02);
-            c.fillStyle = cc; c.fillRect(-65, -70, 130, 140);
-            c.fillStyle = '#6b5a6e55'; for (let l = 0; l < 5; l++) c.fillRect(-50, -40 + l * 20, 70 + ((l * 31) % 30), 6);
-            c.fillStyle = BRAND.orange; c.beginPath(); c.arc(0, -60, 7, 0, Math.PI * 2); c.fill();
+          c.fillRect(0, 0, 768, 576);
+          c.fillStyle = '#b5885499';
+          for (let i = 0; i < 260; i++) c.fillRect((i * 137) % 768, (i * 89) % 576, 3, 3);
+          c.fillStyle = BRAND.plum;
+          c.font = `800 40px ${DISPLAY}`;
+          c.fillText('Story backlog', 28, 52);
+          const ready = cards.filter((x) => x.status === 'ready');
+          c.font = `600 22px ${TEXT}`;
+          c.fillStyle = BRAND.plumSoft;
+          c.fillText(ready.length ? `${ready.length} ready · click to sort` : 'empty · click to fill', 520, 50);
+          const tones = [BRAND.yellow, BRAND.cream, '#ffd9c7', '#ffffff', BRAND.cream, BRAND.yellow];
+          const shown = ready.slice(0, 6);
+          if (!shown.length) {
+            c.fillStyle = '#6b5a6e';
+            c.font = `500 28px ${TEXT}`;
+            c.fillText('Scripty pins researched stories here.', 60, 300);
+          }
+          shown.forEach((card, i) => {
+            const x = 28 + (i % 3) * 246, y = 78 + Math.floor(i / 3) * 246;
+            c.save(); c.translate(x + 110, y + 112); c.rotate(((i * 37) % 9 - 4) * 0.018);
+            c.fillStyle = '#0003'; c.fillRect(-104, -100, 216, 222);
+            c.fillStyle = tones[i % tones.length]; c.fillRect(-110, -106, 216, 222);
+            c.fillStyle = BRAND.orangeText; c.font = `800 22px ${TEXT}`;
+            c.fillText(i === 0 ? 'NEXT' : `#${i + 1}`, -94, -72);
+            c.fillStyle = BRAND.plum; c.font = `800 25px ${DISPLAY}`;
+            wrap(c, card.title, -94, -38, 188, 29, 3);
+            c.fillStyle = BRAND.muted; c.font = `600 18px ${TEXT}`;
+            if (card.when) c.fillText(card.when.slice(0, 22), -94, 92);
+            c.fillStyle = i === 0 ? BRAND.orange : BRAND.sky; c.beginPath(); c.arc(-2, -96, 9, 0, Math.PI * 2); c.fill();
             c.restore();
           });
-          c.strokeStyle = BRAND.orange; c.lineWidth = 4; c.setLineDash([10, 8]);
-          c.beginPath(); c.moveTo(95, 100); c.lineTo(255, 270); c.lineTo(415, 100); c.stroke();
-        });
+          if (shown.length > 1) {
+            c.strokeStyle = BRAND.orange; c.lineWidth = 4; c.setLineDash([10, 8]);
+            c.beginPath();
+            shown.forEach((_, i) => { const px = 136 + (i % 3) * 246, py = 82 + Math.floor(i / 3) * 246; if (i) c.lineTo(px, py); else c.moveTo(px, py); });
+            c.stroke();
+          }
+          cork.needsUpdate = true;
+        };
+        corkDraw([]);
         const easel = new THREE.Group();
         easel.position.set(-4.3, 0, -1.2);
         easel.rotation.y = 0.35;
@@ -542,6 +599,7 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
         cb.position.set(0, 3.6, 0.1);
         easel.add(mesh(new THREE.BoxGeometry(2.6, 2.0, 0.1), std('#6a4632'), 0, 3.6, 0.02), cb);
         g.add(easel);
+        backlogEasel = easel;
       } else if (agent === 'editor') {
         // second monitor, angled, with a timeline
         const tl = canvasTex(256, 160, (c) => {
@@ -627,6 +685,11 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
 
       const key = `${team.id}/${agent}`;
       g.traverse((o) => (o.userData.agentKey = key));
+      // the corkboard opens the backlog instead of the chat
+      if (backlogEasel) {
+        backlogEasel.traverse((o) => { delete o.userData.agentKey; o.userData.backlog = team.id; });
+        backlogEasel = null;
+      }
       block(sx, deskZ, 6.2, 3.0);
       block(sx + stool.position.x, deskZ - 1.5, 1.2, 1.2);
       if (agent === 'script-writer') block(sx - 4.3, deskZ - 1.2, 2.4, 1.0);
@@ -886,6 +949,125 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
   }
   animated.push((t) => bulbs.forEach((b, i) => b.scale.setScalar(0.85 + 0.25 * (0.5 + 0.5 * Math.sin(t * 1.6 + i * 1.7)))));
 
+  // ---- Hall of Fame: studio upgrades unlocked by how many Shorts are out
+  const fameTex = canvasTex(1024, 640, () => {});
+  const fame = new THREE.Group();
+  fame.position.set(-16.5, 0, L + 14.6);
+  fame.add(mesh(new THREE.BoxGeometry(7.2, 4.6, 0.35), std(BRAND.plum, 0.6), 0, 3.4, 0));
+  for (const sx of [-3.2, 3.2]) fame.add(mesh(new THREE.BoxGeometry(0.3, 1.2, 0.8), std('#3a2a22', 0.7), sx, 0.6, 0));
+  const famePic = picture(fameTex, 6.8, 4.25);
+  famePic.position.set(0, 3.4, 0.19);
+  fame.add(famePic);
+  // trophy cups on top (25+)
+  const cups = new THREE.Group();
+  const gold = std('#e9b949', 0.25, { metalness: 0.85 });
+  for (let i = 0; i < 3; i++) {
+    const cup = new THREE.Group();
+    cup.position.set(-1.6 + i * 1.6, 5.75, 0);
+    const sc = i === 1 ? 1.25 : 1;
+    cup.add(mesh(new THREE.CylinderGeometry(0.28 * sc, 0.18 * sc, 0.5 * sc, 16), gold, 0, 0.45 * sc, 0, false));
+    cup.add(mesh(new THREE.CylinderGeometry(0.06, 0.06, 0.3 * sc, 8), gold, 0, 0.1, 0, false));
+    cup.add(mesh(new THREE.BoxGeometry(0.4 * sc, 0.08, 0.3 * sc), gold, 0, -0.05, 0, false));
+    cups.add(cup);
+  }
+  fame.add(cups);
+  add(fame);
+  block(-16.5, L + 14.6, 7.6, 1.0);
+  // neon OOPS sign above the arcades (7+)
+  const neonTex = canvasTex(512, 200, (g) => {
+    g.font = `800 150px ${DISPLAY}`;
+    g.textAlign = 'center';
+    g.shadowColor = BRAND.orange;
+    g.shadowBlur = 30;
+    g.strokeStyle = BRAND.orange;
+    g.lineWidth = 10;
+    g.strokeText('OOPS', 256, 160);
+    g.fillStyle = '#ffd3bd';
+    g.fillText('OOPS', 256, 160);
+  });
+  const neon = picture(neonTex, 2.8, 1.1, true);
+  neon.position.set(W - 0.4, 7.25, L + 6.9);
+  neon.rotation.y = -Math.PI / 2;
+  add(neon);
+  right.trims.push(neon);
+  // disco ball over the record corner (50+)
+  const discoTex = canvasTex(256, 128, (g) => {
+    for (let y = 0; y < 128; y += 8) for (let x = 0; x < 256; x += 8) { g.fillStyle = ['#f4f1ea', '#bdb6ad', '#ffffff', '#8f8a84'][((x + y) / 8 + (y % 3)) % 4]; g.fillRect(x, y, 7, 7); }
+  });
+  const disco = new THREE.Group();
+  disco.position.set(-9, 7.6, HD - 3.6);
+  disco.add(mesh(new THREE.CylinderGeometry(0.02, 0.02, 1.4, 4), std('#222'), 0, 1.0, 0, false));
+  const ball = mesh(new THREE.SphereGeometry(0.75, 24, 16), new THREE.MeshStandardMaterial({ map: discoTex, metalness: 0.9, roughness: 0.15 }), 0, 0, 0, false);
+  disco.add(ball);
+  add(disco);
+  const discoLight = new THREE.PointLight('#a06cd5', 0, 14, 1.6);
+  discoLight.position.set(-9, 6.5, HD - 3.6);
+  add(discoLight);
+  animated.push((t) => {
+    ball.rotation.y = t * 0.8;
+    if (disco.visible) discoLight.color.setHSL((t * 0.07) % 1, 0.8, 0.6);
+  });
+  let fameCount = -1;
+  const setMilestones = (count: number) => {
+    if (count === fameCount) return;
+    fameCount = count;
+    const c = (fameTex.image as HTMLCanvasElement).getContext('2d')!;
+    c.fillStyle = BRAND.night;
+    c.fillRect(0, 0, 1024, 640);
+    c.fillStyle = BRAND.yellow;
+    c.font = `800 64px ${DISPLAY}`;
+    c.fillText('Hall of Fame', 48, 92);
+    c.fillStyle = BRAND.cream;
+    c.font = `600 34px ${TEXT}`;
+    c.textAlign = 'right';
+    c.fillText(`${count} Short${count === 1 ? '' : 's'} out`, 976, 88);
+    c.textAlign = 'left';
+    MILESTONES.forEach((m, i) => {
+      const x = 48 + i * 188, y = 150;
+      const on = count >= m.at;
+      c.fillStyle = on ? '#ffffff14' : '#ffffff08';
+      c.beginPath(); c.roundRect(x, y, 170, 420, 22); c.fill();
+      c.strokeStyle = on ? BRAND.yellow : '#ffffff22';
+      c.lineWidth = 4;
+      c.stroke();
+      // badge
+      c.beginPath(); c.arc(x + 85, y + 120, 62, 0, Math.PI * 2);
+      c.fillStyle = on ? (i === 4 ? '#e9b949' : [BRAND.orange, BRAND.orange, BRAND.yellow, BRAND.violet, '#e9b949'][i]) : '#ffffff10';
+      c.fill();
+      c.fillStyle = on ? BRAND.night : '#ffffff40';
+      c.font = `800 ${m.at >= 100 ? 52 : 62}px ${DISPLAY}`;
+      c.textAlign = 'center';
+      c.fillText(String(m.at), x + 85, y + 142);
+      c.font = `700 26px ${TEXT}`;
+      c.fillStyle = on ? BRAND.cream : '#ffffff55';
+      wrap(c, m.name, x + 85, y + 240, 150, 32, 3, true);
+      c.font = `600 22px ${TEXT}`;
+      c.fillStyle = on ? '#8be0a0' : BRAND.muted;
+      c.fillText(on ? 'unlocked' : `at ${m.at} out`, x + 85, y + 380);
+      c.textAlign = 'left';
+    });
+    fameTex.needsUpdate = true;
+    neon.visible = count >= 7;
+    cups.visible = count >= 25;
+    disco.visible = count >= 50;
+    discoLight.intensity = count >= 50 ? 18 : 0;
+  };
+  setMilestones(0);
+  spots.push({ kind: 'fame', pos: new THREE.Vector3(-15.5, 0, L + 16.0), facing: Math.PI, action: 'look', taken: null });
+
+  // ---- the sky outside the windows follows the time of day
+  let lastSky = '';
+  const setSky = (daylight: number, warmth: number) => {
+    const key = `${daylight.toFixed(2)}|${warmth.toFixed(2)}`;
+    if (key === lastSky) return;
+    lastSky = key;
+    const mix = (a: string, b: string, t: number) => '#' + new THREE.Color(a).lerp(new THREE.Color(b), t).getHexString();
+    const dayTop = mix('#8fb8e8', '#e98a5a', warmth), dayBottom = mix('#f6d9a8', '#ffc98a', warmth);
+    const top = mix('#0d1030', dayTop, daylight), bottom = mix('#2a1f4a', dayBottom, daylight);
+    drawGlass(glassTex.image.getContext('2d') as CanvasRenderingContext2D, top, bottom, Math.max(0, 1 - daylight * 2.2));
+    glassTex.needsUpdate = true;
+  };
+
   // ceiling with beams and pendant lamps: only in first person (top-down looks in from above)
   const ceiling = new THREE.Group();
   const ceil = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_W, D), std('#3b2a30', 1));
@@ -911,6 +1093,31 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
     root, colliders, walls, desks, lines, spots, pickFloor, ceiling,
     room: { w: ROOM_W, d: D, h: H },
     playerStart: new THREE.Vector3(0, 0, HD - 3.2),
+    party: new THREE.Vector3(0, 0, L + 3.6),
     update: (t) => { for (const f of animated) f(t); },
+    setSky,
+    setMilestones,
   };
+}
+
+/** Word-wrap text onto a canvas, at most `lines` lines (the last one ends in … if it doesn't fit). */
+function wrap(c: CanvasRenderingContext2D, text: string, x: number, y: number, w: number, lh: number, lines: number, center = false) {
+  const words = text.split(/\s+/);
+  const out: string[] = [];
+  let cur = '';
+  for (const word of words) {
+    const t = cur ? `${cur} ${word}` : word;
+    if (c.measureText(t).width > w && cur) { out.push(cur); cur = word; } else cur = t;
+  }
+  if (cur) out.push(cur);
+  if (out.length > lines) {
+    out.length = lines;
+    let last = out[lines - 1];
+    while (c.measureText(last + '…').width > w && last.length > 1) last = last.slice(0, -1);
+    out[lines - 1] = last + '…';
+  }
+  const prev = c.textAlign;
+  if (center) c.textAlign = 'center';
+  out.forEach((l, i) => c.fillText(l, x, y + i * lh));
+  c.textAlign = prev;
 }

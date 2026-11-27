@@ -1,9 +1,11 @@
 // Moves Shorts between desks without you: voiced -> Editor builds -> ready_to_render -> GPU render -> delivered.
 // A failed render goes back to the Editor (at most twice per Short) with the error.
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import type { AgentId, TeamId } from '../shared/types';
-import { editorFixKickoff, editorKickoff, editorPart2Kickoff, editorRevisionKickoff, publisherKickoff, reviewerKickoff, AUTOPILOT_TAG } from './agentDefs';
+import { backlogRefill, editorFixKickoff, editorKickoff, editorPart2Kickoff, editorRevisionKickoff, publisherKickoff, reviewerKickoff, scriptResume, AUTOPILOT_TAG } from './agentDefs';
+import { BACKLOG_LOW, BACKLOG_TARGET, readyCards } from './backlog';
+import { fileShort, filedVideo, planEntry, setPosted } from './weeks';
 import { commitAndPush } from './git';
 import { createShortPost, postStatus } from './buffer';
 import { checkPublic, hostVideo } from './media';
@@ -15,10 +17,17 @@ import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
 import { settingsFor } from './teams';
 
-type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
+type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; topic?: string; created?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
 
 /** Statuses that take a day in the one-Short-a-day schedule. */
-const TAKES_A_DAY = /^(queued_buffer|uploaded_scheduled|published|published_manual)$/;
+export const TAKES_A_DAY = /^(queued_buffer|uploaded_scheduled|published|published_manual)$/;
+/** Statuses of a Short that's still being made (not yet ready to post). */
+export const IN_PRODUCTION = /^(planned|scripted|voiced|building|ready_to_render|rendering|render_failed|in_review|reviewing|changes_requested|approved)$/;
+
+export type PipelineEvent =
+  | { type: 'filed'; id: string; title: string; text: string; week: number; fresh: boolean }
+  | { type: 'posted' | 'published'; id: string; title: string; text: string }
+  | { type: 'failed'; id: string; title: string; text: string };
 
 let publishing = false;
 const publishBusy = () => publishing || uploadBusy();
@@ -29,6 +38,11 @@ export class Pipeline {
   private ticking = false;
   onChange: () => void = () => {};
   onBlocked: (message: string) => void = () => {};
+  onEvent: (e: PipelineEvent) => void = () => {};
+  /** why this team shouldn't start new Claude jobs right now (budget guard / plan limit); null = go */
+  gate: () => string | null = () => null;
+  /** upload days already taken across every team (set by main) */
+  takenDays: () => Set<string> = () => new Set();
 
   /** Shorts you pressed Upload for (when automatic upload is off) */
   private uploadNow = new Set<string>();
@@ -50,6 +64,14 @@ export class Pipeline {
     } catch {
       return null;
     }
+  }
+
+  /** After the plan limit resets: everything gets fresh attempts. */
+  resetTries() { this.tries.clear(); }
+
+  /** The video file to post: the filed copy in its week folder if it was moved there, else the render. */
+  private videoFor(file: string): string {
+    return filedVideo(this.team, file) ?? join(outputDir(this.settings().toolkitPath), file);
   }
 
   private attempt(kind: string, id: string, max: number): boolean {
@@ -91,6 +113,8 @@ export class Pipeline {
     const busy = (a: AgentId) => this.agents.currentWork(a);
     if (this.why.has(id)) return this.why.get(id)!;
     const when = m.publish_at ? describeSlot(Date.parse(m.publish_at), s.audienceTimezone) : '';
+    const paused = this.gate();
+    if (paused && IN_PRODUCTION.test(st) && st !== 'ready_to_render' && st !== 'rendering') return `Waiting: ${paused}`;
     if (st === 'published') return `Published on YouTube${when ? ` (${when})` : ''}.`;
     if (st === 'published_manual') return `You posted this yourself${when ? ` (${when})` : ''}. That day counts as this Short's day in the schedule.`;
     if (st === 'uploaded_scheduled') return `On YouTube as private; YouTube makes it public ${when}.`;
@@ -104,7 +128,11 @@ export class Pipeline {
     if (st === 'ready_to_publish') {
       const missing = publishSetupMissing(s);
       if (missing) return `Waiting: ${missing}`;
-      if (s.publishVia === 'manual') return 'Ready for you to post (details below). Then press "I posted it myself".';
+      if (s.publishVia === 'manual') {
+        const e = planEntry(this.team, id);
+        if (e?.video) return `In Week ${e.week}'s folder for ${describeSlot(Date.parse(e.at), s.audienceTimezone)}. Upload it, then press "Mark as posted".`;
+        return m.file ? 'Next to be filed into its week folder.' : 'Ready for you to post (details below). Then press "Mark as posted".';
+      }
       if (!s.youtubeAutoUpload && !this.uploadNow.has(id)) return 'Ready: press "Publish now".';
       return s.publishVia === 'buffer' ? 'Next in line to schedule in Buffer.' : 'Next in line to upload to YouTube.';
     }
@@ -129,12 +157,54 @@ export class Pipeline {
 
   private async step() {
     const s = this.settings();
-    const reg = this.registry();
+    let reg = this.registry();
     if (!reg) return;
     this.why.clear();
     const allowed = (id: string) => s.autopilot || this.manual.has(id);
-    const by = (st: string) => Object.values(reg.shorts).filter((m) => m.status === st && allowed(m.id)).map((m) => m.id).sort();
+    const by = (st: string) => Object.values(reg!.shorts).filter((m) => m.status === st && allowed(m.id)).map((m) => m.id).sort();
     for (const id of [...this.manual]) if (/^(published|published_manual|queued_buffer|draft_in_buffer|uploaded_scheduled|uploaded_private)$/.test(reg.shorts[id]?.status ?? '')) this.manual.delete(id);
+
+    // a render that was cut off (app closed, PC restarted) is stuck at "rendering": queue it again
+    if (!renderBusy()) {
+      const stuck = Object.values(reg.shorts).filter((m) => m.status === 'rendering' && this.attempt('unstick', `${m.id}v${m.version ?? 1}`, 1));
+      for (const m of stuck) {
+        await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=ready_to_render']);
+        this.agents.post('editor', { kind: 'notice', text: `${m.id}'s render was cut off earlier, so it's queued to render again.` });
+      }
+      if (stuck.length) reg = this.registry() ?? reg;
+    }
+
+    // you upload the Shorts yourself: file every one that's ready into its week's folder
+    await this.fileReady(reg);
+
+    // the budget guard / plan limit: no new Claude jobs (rendering and filing still go on)
+    const paused = this.gate();
+    if (paused) {
+      void this.pollBuffer(reg);
+      void this.pollYouTube(reg);
+      if (!renderBusy() && this.agents.isIdle('editor')) {
+        const ready = by('ready_to_render')[0];
+        if (ready && s.renderReady && this.attempt('render', `${ready}v${reg.shorts[ready].version ?? 1}`, 3)) void this.render(ready);
+      }
+      return;
+    }
+
+    // Scripty: finish a Short that was cut off, else keep the story backlog topped up
+    const writer: AgentId = 'script-writer';
+    if (s.autopilot && this.agents.isIdle(writer)) {
+      const recent = (m: Reg['shorts'][string]) => !m.created || Date.now() - Date.parse(m.created) < 4 * 86_400_000;
+      const unfinished = Object.values(reg.shorts).filter((m) => /^(planned|scripted)$/.test(m.status ?? '') && recent(m)).map((m) => m.id).sort()
+        .find((id) => this.attempt('script', id, 1));
+      if (unfinished) {
+        await this.agents.send(writer, scriptResume(unfinished), `Pick up ${unfinished} where it stopped`, { fresh: true, short: unfinished });
+      } else if (s.backlogAuto) {
+        const left = readyCards(s.toolkitPath).length;
+        const day = new Date().toISOString().slice(0, 10);
+        if (left < BACKLOG_LOW && this.attempt('refill', day, 1)) {
+          await this.agents.send(writer, backlogRefill(BACKLOG_TARGET - left), `Research ${BACKLOG_TARGET - left} stories for the backlog`, { fresh: true, effort: 'medium' });
+        }
+      }
+    }
 
     // Hawk works independently of Cutter: review what's rendered (or a review that stopped part-way)
     const reviewer: AgentId = 'reviewer';
@@ -142,7 +212,7 @@ export class Pipeline {
       const toReview = [...by('in_review'), ...by('reviewing')].find((id) => reg.shorts[id].file && this.attempt('review', `${id}v${reg.shorts[id].version ?? 1}`, 2));
       if (toReview) {
         const m = reg.shorts[toReview];
-        const video = join(outputDir(s.toolkitPath), m.file!);
+        const video = this.videoFor(m.file!);
         await this.agents.send(reviewer, reviewerKickoff(toReview, video, m.version ?? 1), `Review ${toReview} v${m.version ?? 1}`, { fresh: true, short: toReview });
       }
     }
@@ -218,7 +288,7 @@ export class Pipeline {
       this.agents.post(publisher, { kind: 'notice', tone: 'warn', text: `${id} has no rendered video recorded, so it can't be posted.` });
       return;
     }
-    const video = join(outputDir(s.toolkitPath), m.file);
+    const video = this.videoFor(m.file);
     const metaFile = join(s.toolkitPath, 'shorts', id, 'publish.json');
     if (!existsSync(metaFile)) {
       this.agents.post(publisher, { kind: 'notice', tone: 'warn', text: `${id} has no publish.json yet; asking Pip to write it.` });
@@ -230,12 +300,13 @@ export class Pipeline {
     let dueAt: string | null = null;
     let when = 'as a draft in Buffer';
     if (s.youtubeMode === 'scheduled') {
-      const taken = new Set(
-        Object.values(reg!.shorts)
+      const taken = new Set([
+        ...this.takenDays(),
+        ...Object.values(reg!.shorts)
           .filter((x) => x.publish_at && x.id !== id && TAKES_A_DAY.test(x.status ?? ''))
           .map((x) => dayKey(Date.parse(x.publish_at!), s.audienceTimezone)),
-      );
-      const at = nextSlot(s.audienceTimezone, s.postingTimes, taken);
+      ]);
+      const at = nextSlot(s.audienceTimezone, s.postingTimes, taken, Date.now(), 90, s.postingDays);
       dueAt = new Date(at).toISOString();
       when = `to go live ${describeSlot(at, s.audienceTimezone)}`;
     }
@@ -258,6 +329,7 @@ export class Pipeline {
       const msg = (e as Error).message;
       await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=publish_failed', `error=${msg.slice(0, 300)}`]);
       this.agents.post(publisher, { kind: 'notice', tone: 'error', text: `Couldn't schedule ${id} in Buffer: ${msg}` });
+      this.onEvent({ type: 'failed', id, title: m.title ?? id, text: `Couldn't schedule ${id} in Buffer: ${msg}` });
     } finally {
       publishing = false;
       this.agents.setExternal(publisher, undefined);
@@ -276,7 +348,7 @@ export class Pipeline {
       this.agents.post(publisher, { kind: 'notice', tone: 'warn', text: `${id} has no rendered video recorded, so it can't be uploaded.` });
       return;
     }
-    const video = join(outputDir(s.toolkitPath), m.file);
+    const video = this.videoFor(m.file);
     const metaFile = join(s.toolkitPath, 'shorts', id, 'publish.json');
     if (!existsSync(metaFile)) {
       await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=approved']);
@@ -285,12 +357,13 @@ export class Pipeline {
     let publishAt: string | null = null;
     let when = 'as private';
     if (s.youtubeMode === 'scheduled') {
-      const taken = new Set(
-        Object.values(reg!.shorts)
+      const taken = new Set([
+        ...this.takenDays(),
+        ...Object.values(reg!.shorts)
           .filter((x) => x.publish_at && x.id !== id && TAKES_A_DAY.test(x.status ?? ''))
           .map((x) => dayKey(Date.parse(x.publish_at!), s.audienceTimezone)),
-      );
-      const at = nextSlot(s.audienceTimezone, s.postingTimes, taken);
+      ]);
+      const at = nextSlot(s.audienceTimezone, s.postingTimes, taken, Date.now(), 90, s.postingDays);
       publishAt = new Date(at).toISOString();
       when = `to go public ${describeSlot(at, s.audienceTimezone)}`;
     }
@@ -307,6 +380,7 @@ export class Pipeline {
     } else {
       await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=publish_failed', `error=${r.message.slice(0, 300)}`]);
       this.agents.post(publisher, { kind: 'notice', tone: 'error', text: `Upload of ${id} failed: ${r.message}` });
+      this.onEvent({ type: 'failed', id, title: m.title ?? id, text: `Upload of ${id} failed: ${r.message}` });
     }
     this.onChange();
     setTimeout(() => void this.tick(), 1000);
@@ -328,8 +402,9 @@ export class Pipeline {
         await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=published', `published_at=${m.publish_at}`]);
         await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${m.id}: published`);
         this.agents.post('publisher', { kind: 'notice', text: `${m.id} went public on YouTube.` });
+        this.onEvent({ type: 'published', id: m.id, title: m.title ?? m.id, text: `${m.id} went public on YouTube.` });
       } else {
-        const msg = `still ${st.privacy} after its go-live time. YouTube may be keeping uploads from your (unverified) Google Cloud project private. Publish it in YouTube Studio, then press "I posted it myself" — or switch Publish via to Buffer.`;
+        const msg = `still ${st.privacy} after its go-live time. YouTube may be keeping uploads from your (unverified) Google Cloud project private. Publish it in YouTube Studio, then press "Mark as posted" — or switch Publish via to Buffer.`;
         await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=publish_failed', `error=${msg.slice(0, 300)}`]);
         this.agents.post('publisher', { kind: 'notice', tone: 'error', text: `${m.id} is ${msg} https://studio.youtube.com/video/${m.youtube_id}/edit` });
       }
@@ -341,10 +416,16 @@ export class Pipeline {
   async markPosted(id: string, whenIso: string | null) {
     const s = this.settings();
     const at = whenIso ? new Date(whenIso).toISOString() : new Date().toISOString();
-    await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=published_manual', `publish_at=${at}`, 'error=']);
+    const filed = planEntry(this.team, id);
+    // no date given: the day it was planned for, if that's already here
+    const when = whenIso ? at : filed && Date.parse(filed.at) < Date.now() ? filed.at : at;
+    await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=published_manual', `publish_at=${when}`, 'error=']);
     this.manual.delete(id);
     this.uploadNow.delete(id);
+    await setPosted(this.team, id, true);
     await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${id}: posted by you`);
+    const title = this.registry()?.shorts[id]?.title ?? id;
+    this.onEvent({ type: 'posted', id, title, text: `${id} is out: ${title}` });
     this.onChange();
   }
 
@@ -352,6 +433,7 @@ export class Pipeline {
     const s = this.settings();
     const ready = existsSync(join(s.toolkitPath, 'shorts', id, 'publish.json'));
     await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, `status=${ready ? 'ready_to_publish' : 'approved'}`, 'publish_at=']);
+    await setPosted(this.team, id, false);
     await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${id}: not posted yet`);
     this.onChange();
   }
@@ -373,6 +455,7 @@ export class Pipeline {
           await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=published', `published_at=${st.sentAt ?? new Date().toISOString()}`]);
           await commitAndPush(s.toolkitPath, ['shorts/registry.json', 'SHORTS.md'], `${m.id}: published`);
           this.agents.post('publisher', { kind: 'notice', text: `${m.id} went live on YouTube.` });
+          this.onEvent({ type: 'published', id: m.id, title: m.title ?? m.id, text: `${m.id} went live on YouTube.` });
           this.onChange();
         } else if (st.status === 'error') {
           await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=publish_failed', `error=${(st.error ?? 'Buffer reported an error').slice(0, 300)}`]);
@@ -380,6 +463,41 @@ export class Pipeline {
           this.onChange();
         }
       } catch { /* try again next time */ }
+    }
+  }
+
+  /** Posting yourself: move each Short that's ready into its week's folder, with its details and upload day. */
+  private async fileReady(reg: Reg) {
+    const s = this.settings();
+    if (s.publishVia !== 'manual') return;
+    for (const m of Object.values(reg.shorts).sort((a, b) => a.id.localeCompare(b.id))) {
+      if (m.status !== 'ready_to_publish' || !m.file) continue;
+      const v = m.version ?? 1;
+      const prev = planEntry(this.team, m.id);
+      if (prev && prev.version === v && prev.video && existsSync(prev.video)) {
+        // a copy left in the render folder (it was open when the Short was filed): tidy it up now
+        const left = join(outputDir(s.toolkitPath), m.file);
+        if (existsSync(left) && left !== prev.video) { try { unlinkSync(left); } catch { /* still open: next time */ } }
+        continue;
+      }
+      if (!this.attempt('file', `${m.id}v${v}`, 2)) continue;
+      const taken = new Set([
+        ...this.takenDays(),
+        ...Object.values(reg.shorts).filter((x) => x.publish_at && TAKES_A_DAY.test(x.status ?? '')).map((x) => dayKey(Date.parse(x.publish_at!), s.audienceTimezone)),
+      ]);
+      try {
+        const r = await fileShort(this.team, { id: m.id, title: m.title || m.topic || m.id, version: v, file: m.file, toolkit: s.toolkitPath }, taken);
+        if (r.ok && r.entry && r.message !== 'already filed') {
+          const text = `${m.id} is ready to upload. ${r.message}`;
+          this.agents.post('publisher', { kind: 'notice', text: `${text} Folder: ${r.entry.video}` });
+          this.onEvent({ type: 'filed', id: m.id, title: m.title ?? m.id, text, week: r.entry.week, fresh: Boolean(r.fresh) });
+          this.onChange();
+        } else if (!r.ok) {
+          this.agents.post('publisher', { kind: 'notice', tone: 'warn', text: `Couldn't file ${m.id} into its week folder: ${r.message}` });
+        }
+      } catch (e) {
+        this.agents.post('publisher', { kind: 'notice', tone: 'warn', text: `Couldn't file ${m.id} into its week folder: ${(e as Error).message}` });
+      }
     }
   }
 

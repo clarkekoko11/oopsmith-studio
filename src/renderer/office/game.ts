@@ -1,7 +1,7 @@
 // The walkable studio: renderer, lights, player, every team's agents (and what they get up to when idle),
 // the two camera modes, input and name tags.
 import * as THREE from 'three';
-import type { AgentId, AgentStatus, ShortRow, TeamId } from '../../shared/types';
+import type { AgentId, AgentStatus, BacklogCard, ShortRow, TeamId } from '../../shared/types';
 import { makeCharacter, type Action, type Character, type Look } from './characters';
 import { collide, NavGrid } from './nav';
 import { BRAND, buildOffice, updateMonitor, type ActivitySpot, type DeskSpot, type World } from './world';
@@ -48,7 +48,19 @@ interface AgentActor {
   seatY: number;
   /** you're walking over to talk to them: they wait for you */
   held: boolean;
+  /** busy at the desk but waving along with a celebration until then */
+  waveUntil: number;
 }
+
+/** Daylight 0..1 and sunrise/sunset warmth 0..1 for an hour of the day (0-24). */
+export function skyAt(h: number): { daylight: number; warmth: number } {
+  const ss = (a: number, b: number, x: number) => { const t = Math.min(1, Math.max(0, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const daylight = ss(5.3, 7.6, h) * (1 - ss(17.6, 19.8, h));
+  const g = (c: number, w: number) => Math.exp(-((h - c) ** 2) / (2 * w * w));
+  return { daylight, warmth: Math.min(1, Math.max(g(6.7, 0.8), g(17.9, 0.9))) };
+}
+
+interface Confetti { mesh: THREE.InstancedMesh; vel: Float32Array; spin: Float32Array; born: number }
 
 const TOPDOWN_PITCH = 0.95; // radians above the floor
 const WALK_SPEED = 14;
@@ -65,7 +77,16 @@ export class Office {
   onMode: (m: CameraMode) => void = () => {};
   onHint: (key: string | null) => void = () => {};
   onScreen: (team: TeamId) => void = () => {};
+  onBacklog: (team: TeamId) => void = () => {};
   private videos = new Map<TeamId, HTMLVideoElement>();
+  private hemi: THREE.HemisphereLight;
+  /** null = follow the real clock; a number pins the hour (Settings or ?hour= for previews) */
+  private hourOverride: number | null = null;
+  private dayNight = true;
+  private lastSky = -1;
+  private confetti: Confetti[] = [];
+  private milestones = 0;
+  private corks = new Map<TeamId, BacklogCard[]>();
 
   private player: Character;
   private pos = new THREE.Vector3(0, 0, 11.5);
@@ -107,7 +128,10 @@ export class Office {
 
     this.scene.background = new THREE.Color(BRAND.night);
     this.scene.fog = new THREE.Fog(BRAND.night, 120, 260);
-    this.scene.add(new THREE.HemisphereLight('#ffe9cf', '#5a3b40', 1.35));
+    this.hemi = new THREE.HemisphereLight('#ffe9cf', '#5a3b40', 1.35);
+    this.scene.add(this.hemi);
+    const qh = new URLSearchParams(location.search).get('hour');
+    if (qh !== null && !Number.isNaN(Number(qh))) this.hourOverride = Number(qh);
     // late-afternoon sun through the factory windows
     this.sun = new THREE.DirectionalLight('#ffe2b8', 2.2);
     this.sun.castShadow = true;
@@ -179,7 +203,7 @@ export class Office {
           key: desk.key, team: team.id, id: desk.agent, ch, desk, tag,
           status: prev?.status ?? 'offline', talking: false,
           pos: desk.stand.clone(), heading: desk.facing, walkPhase: 0, walkAmt: 0, path: [], final: null,
-          mode: 'desk', spot: null, action: 'stand', until: this.t + rand(4, 14), seatY: 0, held: false,
+          mode: 'desk', spot: null, action: 'stand', until: this.t + rand(4, 14), seatY: 0, held: false, waveUntil: 0,
         });
         if (prev) this.renderTag(this.agents[this.agents.length - 1], prev.tag.dataset.name ?? '', prev.tag.dataset.role ?? '', prev.tag.dataset.activity);
       }
@@ -191,6 +215,114 @@ export class Office {
     this.camTarget.copy(this.pos);
     this.player.root.visible = this.mode === 'topdown';
     this.world.ceiling.visible = this.mode === 'firstperson';
+    this.lastSky = -1;
+    this.world.setMilestones(this.milestones);
+    for (const l of this.world.lines) l.drawCork(this.corks.get(l.team) ?? []);
+  }
+
+  // ---------- time of day, backlog, milestones, celebrations
+  /** Follow the real time of day (on), or keep the warm late-afternoon look (off). */
+  setDayNight(on: boolean) {
+    this.dayNight = on;
+    this.lastSky = -1;
+  }
+  private applySky(force = false) {
+    const now = new Date();
+    const h = this.hourOverride ?? (this.dayNight ? now.getHours() + now.getMinutes() / 60 : 16.3);
+    if (!force && Math.abs(h - this.lastSky) < 0.05) return;
+    this.lastSky = h;
+    const { daylight: d, warmth: w } = skyAt(h);
+    const c = (a: string, b: string, t: number) => new THREE.Color(a).lerp(new THREE.Color(b), t);
+    // the sun (moonlight at night) through the factory windows
+    this.sun.color.copy(c('#8fa6ff', c('#ffe2b8', '#ffad6b', w).getStyle(), d));
+    this.sun.intensity = 0.25 + d * (2.2 - 0.6 * w) ;
+    this.hemi.color.copy(c('#8f97c8', '#ffe9cf', d));
+    this.hemi.intensity = 0.6 + d * 0.75;
+    // lamps feel cozier at night
+    this.lights.children.forEach((l) => ((l as THREE.PointLight).intensity = 55 + (1 - d) * 40));
+    this.renderer.toneMappingExposure = 0.92 + d * 0.08;
+    this.world.setSky(d, w);
+  }
+  setCork(team: TeamId, cards: BacklogCard[]) {
+    this.corks.set(team, cards);
+    this.world.lines.find((l) => l.team === team)?.drawCork(cards);
+  }
+  setMilestones(count: number) {
+    this.milestones = count;
+    this.world.setMilestones(count);
+  }
+  /**
+   * A Short is out (or a week is full, or an upgrade unlocked): the team's free agents gather on the lounge rug and
+   * dance, busy ones wave from their desks, and confetti comes down. team null = everyone.
+   */
+  celebrate(team: TeamId | null) {
+    const crew = this.agents.filter((a) => !team || a.team === team);
+    const free = crew.filter((a) => (a.status === 'idle' || a.status === 'offline') && !a.held);
+    const c = this.world.party;
+    free.forEach((a, i) => {
+      const ang = (i / Math.max(1, free.length)) * Math.PI * 2 + Math.random() * 0.4;
+      const r = 2.2 + (i % 2) * 1.1;
+      const pos = new THREE.Vector3(c.x + Math.cos(ang) * r, 0, c.z + Math.sin(ang) * r * 0.7);
+      this.release(a);
+      a.spot = { kind: 'party', pos, facing: Math.atan2(c.x - pos.x, c.z - pos.z), action: 'dance', taken: a.key };
+      a.mode = 'going';
+      a.action = 'stand';
+      a.until = this.t + 16;
+      this.sendTo(a, pos.x, pos.z, pos);
+    });
+    for (const a of crew) if (!free.includes(a)) a.waveUntil = this.t + 5;
+    this.burst(new THREE.Vector3(c.x, 9, c.z));
+    if (team) {
+      const line = this.world.lines.find((l) => l.team === team);
+      if (line) this.burst(new THREE.Vector3(19.5, 8.5, line.z0 + 6.4)); // over Pip's desk too
+    }
+  }
+  private burst(at: THREE.Vector3) {
+    const n = 260;
+    const geo = new THREE.PlaneGeometry(0.22, 0.34);
+    const mat = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false });
+    const mesh = new THREE.InstancedMesh(geo, mat, n);
+    const cols = [BRAND.orange, BRAND.yellow, BRAND.sky, BRAND.violet, BRAND.cream];
+    const vel = new Float32Array(n * 3), spin = new Float32Array(n * 3);
+    const m = new THREE.Matrix4();
+    const color = new THREE.Color();
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2, sp = 2 + Math.random() * 7;
+      vel.set([Math.cos(a) * sp, 3 + Math.random() * 6, Math.sin(a) * sp], i * 3);
+      spin.set([Math.random() * 8, Math.random() * 8, Math.random() * 8], i * 3);
+      m.makeTranslation(at.x, at.y, at.z);
+      mesh.setMatrixAt(i, m);
+      mesh.setColorAt(i, color.set(cols[i % cols.length]));
+    }
+    mesh.userData.origin = at.clone();
+    mesh.frustumCulled = false;
+    this.scene.add(mesh);
+    this.confetti.push({ mesh, vel, spin, born: this.t });
+  }
+  private updateConfetti() {
+    const m = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), p = new THREE.Vector3(), one = new THREE.Vector3(1, 1, 1);
+    for (const c of [...this.confetti]) {
+      const age = this.t - c.born;
+      if (age > 7) {
+        this.scene.remove(c.mesh);
+        c.mesh.geometry.dispose();
+        (c.mesh.material as THREE.Material).dispose();
+        this.confetti.splice(this.confetti.indexOf(c), 1);
+        continue;
+      }
+      const o = c.mesh.userData.origin as THREE.Vector3;
+      for (let i = 0; i < c.mesh.count; i++) {
+        const vx = c.vel[i * 3], vy = c.vel[i * 3 + 1], vz = c.vel[i * 3 + 2];
+        // a quick pop, then paper fluttering down (air drag)
+        const drag = 1 - Math.exp(-age * 1.4);
+        p.set(o.x + (vx / 1.4) * drag + Math.sin(age * 3 + i) * 0.3, Math.max(0.05, o.y + (vy / 1.4) * drag - age * 1.6), o.z + (vz / 1.4) * drag);
+        e.set(c.spin[i * 3] * age, c.spin[i * 3 + 1] * age, c.spin[i * 3 + 2] * age);
+        q.setFromEuler(e);
+        m.compose(p, q, one);
+        c.mesh.setMatrixAt(i, m);
+      }
+      c.mesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   private actor(team: TeamId, id: AgentId) {
@@ -215,10 +347,10 @@ export class Office {
     a.tag.innerHTML = `<div class="bubble"><span class="dot"></span>${esc(line)}</div><div class="name">${esc(name)}<span>${esc(role)}</span>${team}</div>`;
   }
   private idleLabel(a: AgentActor): string {
-    if (a.mode === 'going') return 'on a break';
+    if (a.mode === 'going') return a.spot?.kind === 'party' ? 'party time' : 'on a break';
     if (a.mode === 'returning') return 'heading back';
     if (a.mode === 'activity' && a.spot) {
-      return ({ coffee: a.action === 'chat' ? 'chatting' : 'coffee break', cooler: 'getting water', sofa: 'chilling', beanbag: 'chilling', arcade: 'playing arcade', read: 'reading', armchair: 'reading', water: 'watering plants', window: 'daydreaming', record: 'vibing to records' } as Record<string, string>)[a.spot.kind] ?? 'idle';
+      return ({ coffee: a.action === 'chat' ? 'chatting' : 'coffee break', cooler: 'getting water', sofa: 'chilling', beanbag: 'chilling', arcade: 'playing arcade', read: 'reading', armchair: 'reading', water: 'watering plants', window: 'daydreaming', record: 'vibing to records', party: 'celebrating', fame: 'admiring the Hall of Fame' } as Record<string, string>)[a.spot.kind] ?? 'idle';
     }
     return a.action === 'stretch' ? 'stretching' : a.action === 'think' ? 'thinking' : 'idle';
   }
@@ -380,7 +512,7 @@ export class Office {
         if (this.dragging.button === 2) this.yaw -= e.movementX * 0.006;
       } else {
         const hit = this.pick(e.clientX, e.clientY);
-        el.style.cursor = hit.agent || hit.screen ? 'pointer' : 'default';
+        el.style.cursor = hit.agent || hit.screen || hit.backlog ? 'pointer' : 'default';
       }
     });
     window.addEventListener('pointerup', (e) => {
@@ -390,6 +522,7 @@ export class Office {
       if (e.target !== el) return;
       const hit = this.pick(e.clientX, e.clientY);
       if (hit.screen) this.onScreen(hit.screen);
+      else if (hit.backlog) this.onBacklog(hit.backlog);
       else if (hit.agent) this.walkToAgent(hit.agent);
       else if (hit.point) {
         const p = this.nav.path(this.pos.x, this.pos.z, hit.point.x, hit.point.z);
@@ -404,7 +537,7 @@ export class Office {
     });
   }
 
-  private pick(cx: number, cy: number): { agent?: string; point?: THREE.Vector3; screen?: TeamId } {
+  private pick(cx: number, cy: number): { agent?: string; point?: THREE.Vector3; screen?: TeamId; backlog?: TeamId } {
     const r = this.renderer.domElement.getBoundingClientRect();
     const ndc = new THREE.Vector2(((cx - r.left) / r.width) * 2 - 1, -((cy - r.top) / r.height) * 2 + 1);
     this.raycaster.setFromCamera(ndc, this.camera);
@@ -414,6 +547,7 @@ export class Office {
       const agent = h.object.userData.agentKey as string | undefined;
       if (agent) return { agent };
       if (h.object.userData.screen) return { screen: h.object.userData.screen as TeamId };
+      if (h.object.userData.backlog) return { backlog: h.object.userData.backlog as TeamId };
       if (this.world.pickFloor.includes(h.object)) return { point: h.point };
     }
     const { w, d } = this.world.room;
@@ -503,7 +637,7 @@ export class Office {
           a.mode = 'activity';
           a.action = a.spot.action;
           a.ch.hold(a.spot.prop ?? null);
-          a.until = t + (a.spot.action === 'sit' || a.spot.action === 'readSit' ? rand(14, 30) : rand(8, 18));
+          a.until = t + (a.spot.kind === 'party' ? rand(10, 14) : a.spot.action === 'sit' || a.spot.action === 'readSit' ? rand(14, 30) : rand(8, 18));
         } else {
           a.mode = 'desk';
           a.action = 'stand';
@@ -531,7 +665,8 @@ export class Office {
       // at the desk
       a.pos.lerp(a.desk.stand, 0.2);
       face = a.desk.facing;
-      if (a.status === 'working') a.action = 'type';
+      if (a.waveUntil > t) a.action = 'wave';
+      else if (a.status === 'working') a.action = 'type';
       else if (a.status === 'needs-you') a.action = 'wave';
       else if (a.status === 'error') a.action = 'think';
       else if (a.status === 'offline') a.action = 'stand';
@@ -643,6 +778,8 @@ export class Office {
     this.onHint(this.mode === 'firstperson' && this.nearAgent && this.inputEnabled ? this.nearAgent : null);
 
     this.world.update(t);
+    this.applySky();
+    if (this.confetti.length) this.updateConfetti();
     this.updateCamera(dt);
     this.updateWalls();
     this.renderer.render(this.scene, this.camera);

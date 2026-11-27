@@ -6,6 +6,7 @@ import type { SDKUserMessage, SDKMessage, Query } from '@anthropic-ai/claude-age
 import { MAIN_TEAM, type AgentEvent, type AgentId, type AgentInfo, type AgentStatus, type ChatItem, type TeamId, type UsageState } from '../shared/types';
 import { AGENTS, AUTOPILOT_TAG, agentMeta, instructions, LIVE_PHASE, PROMPT_VERSION } from './agentDefs';
 import { decide, describeTool, inside } from './permissions';
+import { profileEnv, teamProfile } from './profiles';
 import { agentEnv, claudeExecutable, loadSdk } from './sdk';
 import { getGeminiKey } from './settings';
 import { settingsFor } from './teams';
@@ -27,6 +28,25 @@ const DEFAULT_EFFORT = { 'script-writer': 'high', editor: 'high', reviewer: 'med
 
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 const store = (...p: string[]) => join(app.getPath('userData'), ...p);
+
+/**
+ * Jobs that were running, so they can be picked up after the app closes, crashes or the PC restarts, and jobs that
+ * the Claude plan limit cut off (picked up when the limit resets). A job that finishes normally is removed.
+ */
+export interface JournalEntry { team: TeamId; agent: AgentId; text: string; display?: string; short?: string; at: number; limit?: boolean }
+type Journal = Record<string, JournalEntry>;
+const journalFile = () => store('jobs.json');
+export function readJournal(): Journal {
+  try { return JSON.parse(readFileSync(journalFile(), 'utf8')) as Journal; } catch { return {}; }
+}
+function writeJournal(j: Journal) {
+  try { writeFileSync(journalFile(), JSON.stringify(j, null, 1)); } catch { /* best effort */ }
+}
+function journal(key: string, e: JournalEntry | null) {
+  const j = readJournal();
+  if (e) j[key] = e; else delete j[key];
+  writeJournal(j);
+}
 
 class Inbox {
   private items: SDKUserMessage[] = [];
@@ -73,6 +93,10 @@ class AgentSession {
   currentShort?: string;
   /** set while the app (not the agent) is busy for this desk, e.g. rendering */
   external?: string;
+  /** the plan limit was hit during the current job */
+  private hitLimit = false;
+  /** thinking effort for the next fresh conversation only (e.g. backlog research runs lighter) */
+  private effortOnce?: string;
 
   /** main team keeps the original file names, so chats from before teams existed stay put */
   private get historyDir() { return this.team === MAIN_TEAM ? store('history') : store('history', this.team); }
@@ -137,7 +161,7 @@ class AgentSession {
    * fresh: start a new conversation (one per Short, so old Shorts don't get re-sent on every step).
    * short: the Short this work is for (tokens are counted against it).
    */
-  async send(text: string, display?: string, opts: { fresh?: boolean; short?: string } = {}): Promise<boolean> {
+  async send(text: string, display?: string, opts: { fresh?: boolean; short?: string; effort?: string } = {}): Promise<boolean> {
     const settings = this.settings();
     if (!settings.toolkitPath || !existsSync(settings.toolkitPath)) {
       this.notice("The toolkit isn't on this PC yet. Open Settings → Toolkit → Clone / update.", 'warn');
@@ -146,6 +170,7 @@ class AgentSession {
     if (opts.fresh) {
       this.reset();
       this.sessionId = undefined;
+      this.effortOnce = opts.effort;
       this.currentShort = opts.short;
       this.notice(`New conversation${opts.short ? ` for ${opts.short}` : ''}.`);
     } else if (opts.short) {
@@ -156,6 +181,8 @@ class AgentSession {
     const tagged = settings.autopilot && !text.startsWith(AUTOPILOT_TAG) ? `${AUTOPILOT_TAG} ${text}` : text;
     this.put({ kind: 'user', id: uid(), text: display ?? text.replace(AUTOPILOT_TAG, '').trim(), at: Date.now() });
     this.setStatus('working', 'thinking…');
+    this.hitLimit = false;
+    journal(this.key, { team: this.team, agent: this.id, text, display, short: this.currentShort, at: Date.now() });
     if (!this.inbox) await this.start();
     this.inbox!.push(tagged);
     return true;
@@ -187,7 +214,7 @@ class AgentSession {
         maxTurns: { 'script-writer': 80, editor: 160, reviewer: 50, publisher: 40 }[this.id],
         systemPrompt: { type: 'preset', preset: 'claude_code', append, excludeDynamicSections: true },
         tools: TOOLS[this.id],
-        effort: settings.effort?.[this.id] ?? DEFAULT_EFFORT[this.id],
+        effort: (this.effortOnce ?? settings.effort?.[this.id] ?? DEFAULT_EFFORT[this.id]) as 'low' | 'medium' | 'high' | 'xhigh' | 'max',
         // long command output goes to a file (the agent sees a preview + path); long jobs compact early
         settings: { bashOutputMaxChars: 8000, autoCompactWindow: 120_000 },
         settingSources: [],
@@ -195,7 +222,7 @@ class AgentSession {
         permissionMode: 'default',
         disallowedTools: ['AskUserQuestion', 'Agent', 'Task'],
         pathToClaudeCodeExecutable: claudeExecutable(),
-        env: agentEnv({ GEMINI_API_KEY: this.id === 'script-writer' ? getGeminiKey() : undefined, PYTHONIOENCODING: 'utf-8' }),
+        env: agentEnv({ ...profileEnv(teamProfile(this.team)), GEMINI_API_KEY: this.id === 'script-writer' ? getGeminiKey() : undefined, PYTHONIOENCODING: 'utf-8' }),
         canUseTool: async (tool, input) => {
           const d = decide(tool, input, root, this.id);
           if (d.kind === 'allow') return { behavior: 'allow', updatedInput: input };
@@ -281,7 +308,8 @@ class AgentSession {
       case 'assistant': {
         if (m.parent_tool_use_id) return;
         if (m.error === 'rate_limit') {
-          this.notice('Your Claude plan limit was reached. The agent will pause until it resets.', 'warn');
+          this.hitLimit = true;
+          this.notice('Your Claude plan limit was reached. This job picks up again when it resets.', 'warn');
         } else if (m.error === 'authentication_failed') {
           this.notice('Claude sign-in failed. Open Settings → Claude account to check your login.', 'error');
         }
@@ -305,8 +333,9 @@ class AgentSession {
       }
       case 'rate_limit_event': {
         const r = m.rate_limit_info;
-        this.usage({ status: r.status, utilization: r.utilization, window: r.rateLimitType, resetsAt: r.resetsAt });
+        this.usage({ profile: teamProfile(this.team), status: r.status, utilization: r.utilization, window: r.rateLimitType, resetsAt: r.resetsAt });
         if (r.status === 'rejected') {
+          this.hitLimit = true;
           const when = r.resetsAt ? new Date(r.resetsAt * (r.resetsAt < 1e12 ? 1000 : 1)).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : 'later';
           this.notice(`Claude plan limit reached — resets at ${when}.`, 'warn');
         }
@@ -323,6 +352,12 @@ class AgentSession {
           this.notice(`${this.currentShort ?? 'This job'} · ${describe(turn)}`);
           this.onUsage(this.currentShort);
         }
+        // finished: off the journal, unless the plan limit cut it off (then it's picked up after the reset)
+        if (m.subtype !== 'success' && this.hitLimit) {
+          const j = readJournal()[this.key];
+          if (j) journal(this.key, { ...j, limit: true });
+        } else journal(this.key, null);
+        this.hitLimit = false;
         this.setStatus('idle');
         setTimeout(() => this.onTurnEnd(this.id), 0);
         return;
@@ -346,6 +381,7 @@ class AgentSession {
   }
 
   async stop() {
+    journal(this.key, null);
     for (const [id] of this.pendingPermissions) this.answerPermission(id, false);
     try { await this.q?.interrupt(); } catch { /* not running */ }
     if (this.status !== 'idle') this.setStatus('idle');
@@ -359,7 +395,14 @@ class AgentSession {
     this.liveTextId = undefined;
   }
 
+  /** keep the chat on screen, but the next message starts a new conversation */
+  forgetSession() {
+    this.reset();
+    this.sessionId = undefined;
+  }
+
   newChat() {
+    journal(this.key, null);
     this.reset();
     this.sessionId = undefined;
     this.history = [];
@@ -388,7 +431,16 @@ export class AgentManager {
     const m = agentMeta(id);
     return [{ kind: 'notice', id: 'offline', at: 0, text: `${m.name} the ${m.role} starts work in Phase ${m.phase}. Talk to Scripty at the Script Writer desk for now.` }];
   }
-  send(id: AgentId, text: string, display?: string, opts?: { fresh?: boolean; short?: string }) { return this.sessions.get(id)?.send(text, display, opts); }
+  send(id: AgentId, text: string, display?: string, opts?: { fresh?: boolean; short?: string; effort?: string }) { return this.sessions.get(id)?.send(text, display, opts); }
+  /** Jobs of this team that didn't finish (app closed, crash, or the plan limit), oldest first. */
+  unfinished(): JournalEntry[] {
+    return Object.values(readJournal()).filter((j) => (j.team ?? MAIN_TEAM) === this.team).sort((a, b) => a.at - b.at);
+  }
+  clearUnfinished(id: AgentId) {
+    journal(this.team === MAIN_TEAM ? id : `${this.team}/${id}`, null);
+  }
+  /** The account changed: saved conversations belong to the old login, so start fresh. */
+  forgetSessions() { for (const s of this.sessions.values()) s.forgetSession(); }
   /** The Short a desk is busy with, if any. */
   currentWork(id: AgentId): string | undefined {
     const s = this.sessions.get(id);

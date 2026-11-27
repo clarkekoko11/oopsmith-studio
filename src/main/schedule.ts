@@ -48,20 +48,42 @@ export function dayKey(t: number, tz: string) {
  * The next free daily slot: the earliest day (today included, if its time is at least `leadMinutes` away)
  * that has no other Short scheduled, at that weekday's time.
  */
-export function nextSlot(tz: string, times: Partial<Record<Day, string>>, takenDays: Set<string>, now = Date.now(), leadMinutes = 90): number {
+export function nextSlot(tz: string, times: Partial<Record<Day, string>>, takenDays: Set<string>, now = Date.now(), leadMinutes = 90, days: readonly Day[] = DAYS): number {
   const today = parts(now, tz);
-  for (let k = 0; k < 60; k++) {
+  const open = days.length ? days : DAYS;
+  for (let k = 0; k < 120; k++) {
     // noon of day k, to step calendar days safely across DST changes
     const noon = zoned(today.y, today.m, today.d + k, 12, 0, tz);
     const p = parts(noon, tz);
-    const [hh, mm] = (times[p.wd] ?? RESEARCHED_TIMES[p.wd]).split(':').map(Number);
+    if (!open.includes(p.wd)) continue;
+    const [hh, mm] = (times[p.wd] || RESEARCHED_TIMES[p.wd]).split(':').map(Number);
     const at = zoned(p.y, p.m, p.d, hh, mm || 0, tz);
     if (at < now + leadMinutes * 60_000) continue;
     if (takenDays.has(dayKey(at, tz))) continue;
     return at;
   }
-  throw new Error('No free day in the next 60 days');
+  throw new Error('No free day in the next 120 days');
 }
+
+// ---- calendar days as "YYYY-MM-DD" strings (no time zone involved)
+const toUtc = (day: string) => { const [y, m, d] = day.split('-').map(Number); return Date.UTC(y, m - 1, d); };
+const fromUtc = (t: number) => new Date(t).toISOString().slice(0, 10);
+export const addDays = (day: string, n: number) => fromUtc(toUtc(day) + n * 86_400_000);
+export const daysBetween = (a: string, b: string) => Math.round((toUtc(b) - toUtc(a)) / 86_400_000);
+/** 0 = Sunday */
+export const weekdayIndex = (day: string) => new Date(toUtc(day)).getUTCDay();
+export const weekdayOf = (day: string): Day => DAYS[weekdayIndex(day)];
+/** the Monday on or before this day */
+export const mondayOf = (day: string) => addDays(day, -((weekdayIndex(day) + 6) % 7));
+/** "Mon 30 Nov" */
+export const shortDay = (day: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(toUtc(day)));
+
+/** Best weekdays first (Buffer / SocialPilot 2026: Friday strongest, late Sunday weakest): picks the days for a quota. */
+export const DAY_RANK: Day[] = ['fri', 'thu', 'tue', 'sat', 'wed', 'mon', 'sun'];
+export const daysForQuota = (n: number): Day[] => {
+  const pick = new Set(DAY_RANK.slice(0, Math.max(1, Math.min(7, n))));
+  return DAYS.filter((d) => pick.has(d));
+};
 
 /** "Fri 27 Nov, 4:00 PM (New York) · Sat 5:00 AM your time" */
 export function describeSlot(t: number, tz: string): string {

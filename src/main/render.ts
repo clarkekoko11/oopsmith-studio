@@ -1,7 +1,7 @@
 // Runs the toolkit's own PC render worker (tools/render_worker.py) for the app:
 // one-time setup, and rendering one Short at a time on the graphics card.
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -58,6 +58,22 @@ export function outputDir(toolkit: string): string {
     if (cfg.output_dir) dir = cfg.output_dir;
   } catch { /* defaults */ }
   return dir.replace(/^~(?=$|[\\/])/, homedir());
+}
+
+/**
+ * Point the toolkit's render worker at a folder (worker.json "output_dir", the worker's own setting, so renders
+ * started outside the app land there too). '' leaves the worker's default. Returns true when it changed.
+ */
+export function setOutputDir(toolkit: string, dir: string): boolean {
+  if (!toolkit || !existsSync(toolkit)) return false;
+  const file = join(toolkit, 'worker.json');
+  let cfg: Record<string, unknown> = {};
+  try { cfg = JSON.parse(readFileSync(file, 'utf8')); } catch { /* the worker fills in the rest */ }
+  const want = dir || join('~', 'Videos', 'RobloxShorts');
+  if (cfg.output_dir === want || (!dir && !cfg.output_dir)) return false;
+  cfg.output_dir = want;
+  writeFileSync(file, JSON.stringify(cfg, null, 2));
+  return true;
 }
 
 /** What the worker is doing, in plain words, from its log line. */

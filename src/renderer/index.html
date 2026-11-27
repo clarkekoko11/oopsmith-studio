@@ -19,6 +19,7 @@
       <button id="updateChip" class="tb-btn update" hidden title="A new version is ready"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span>Update</span></button>
       <button id="autopilot" class="switch" role="switch" title="Autopilot: agents decide everything themselves and never ask you"><span class="track"><span class="knob"></span></span><span class="lbl">Autopilot</span><b hidden>ON</b></button>
       <button id="reviewBtn" class="tb-btn" title="Watch renders, read Hawk's reviews, approve or send back"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 9.5v5l4.5-2.5z" fill="currentColor"/></svg><span>Review</span></button>
+      <button id="weekBtn" class="tb-btn week" hidden title="This week's uploads: open the weekly plan"><svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="3.5" y="5" width="17" height="15" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M3.5 10h17M8 3v4M16 3v4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg><span>Week 1</span><b class="wk-count">0/7</b></button>
       <button id="runToday" class="tb-btn primary" title="Scripty makes today's Short from start to finish"><svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true"><path d="M7 4.5v15l12-7.5z" fill="currentColor"/></svg><span>Make today's Short</span></button>
     </div>
     <div class="tb-group right">
@@ -37,6 +38,7 @@
   </header>
 
   <div id="banner" hidden></div>
+  <div id="toast" hidden role="status"><b></b><span></span></div>
 
   <div id="help">
     <div data-for="topdown"><b>Click</b> floor to walk · <b>Click</b> agent to talk · <b>Scroll</b> zoom · <b>Q/E</b> rotate · <b>V</b> first person</div>
@@ -90,7 +92,8 @@
               <div class="row"><button class="btn primary sm" id="uploadBtn">Publish now</button><a id="bufferLink" class="btn ghost sm" href="https://publish.buffer.com" target="_blank" rel="noreferrer" hidden>Open Buffer</a><a id="studioLink" class="btn ghost sm" target="_blank" rel="noreferrer" hidden>Open in YouTube Studio</a></div>
             </div>
             <p class="empty-note" id="noPublish">Pip writes the title, description and tags after the Short is approved.</p>
-            <div class="posted" id="postedBox"><span class="muted">Posted it yourself?</span><input id="postedAt" type="datetime-local" /><button class="btn ghost sm" id="markPosted">Mark as posted</button><button class="btn ghost sm" id="unmarkPosted" hidden>Not posted after all</button></div>
+            <div class="plan-box" id="planBox" hidden><div><b id="planWhen"></b><span class="muted small" id="planWhere"></span></div><button class="btn ghost sm" id="planOpen"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2.2h7A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Open week folder</button></div>
+            <div class="posted" id="postedBox"><span class="muted">Uploaded it?</span><input id="postedAt" type="datetime-local" /><button class="btn ghost sm" id="markPosted">Mark as posted</button><button class="btn ghost sm" id="unmarkPosted" hidden>Not posted after all</button></div>
           </div>
           <div data-pane="tokens" hidden><div id="reviewUsage"></div></div>
         </div>
@@ -99,6 +102,25 @@
           <div class="row"><p id="reviewMsg"></p><button class="btn ghost" id="changesBtn">Request changes</button><button class="btn primary" id="approveBtn">Approve</button></div>
         </footer>
       </section>
+    </div>
+  </div>
+
+  <div id="weeks" class="modal" hidden>
+    <div class="sheet weeks-sheet" role="dialog" aria-labelledby="weeksTitle">
+      <div class="sheet-head"><h2 id="weeksTitle">Upload weeks</h2><button class="icon sm" id="closeWeeks" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div>
+      <p class="muted">Every Short that's ready goes into its week's folder with a text file of its title, description and tags, on the next free upload day. Upload it, then press <b>Mark as posted</b> on the review screen.</p>
+      <div class="quota-row"><span class="lbl">Upload days</span><div class="days" id="weekDays"></div><span class="quota" id="quotaLabel"></span></div>
+      <div class="row folder-row"><span class="muted small path" id="weeksPath"></span><button class="btn ghost sm" id="openWeeksRoot"><svg viewBox="0 0 24 24" width="15" height="15" aria-hidden="true"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5h4l2 2.2h7A2.5 2.5 0 0 1 21 9.7v7.8a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>Open folder</button></div>
+      <div id="weekList"></div>
+    </div>
+  </div>
+
+  <div id="backlog" class="modal" hidden>
+    <div class="sheet backlog-sheet" role="dialog" aria-labelledby="backlogTitle">
+      <div class="sheet-head"><h2 id="backlogTitle">Story backlog</h2><button class="icon sm" id="closeBacklog" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div>
+      <p class="muted">True stories Scripty already researched. The daily run takes the top one, so the order is yours to set. Researching a few at once uses less of your plan than searching for every Short.</p>
+      <div id="cardList"></div>
+      <div class="row"><p class="muted small" id="backlogMsg"></p><button class="btn ghost" id="refillBtn">Research more stories</button></div>
     </div>
   </div>
 
@@ -134,6 +156,11 @@
         <p class="muted">Agents use the Claude account signed in to Claude Code on this PC. To sign in or switch, press <b>Sign in / switch</b>, type <code>/login</code> in the terminal that opens, then <b>Check again</b>.</p>
         <div class="row"><button class="btn ghost" id="loginBtn">Sign in / switch</button><button class="btn ghost" id="recheck">Check again</button></div>
         <p class="msg" id="loginMsg"></p>
+        <h3 class="sub">More Claude accounts</h3>
+        <p class="muted small">Give a team its own Claude account (Teams → Claude account), so each line has its own plan limit. Each account signs in once in its own terminal and stays signed in.</p>
+        <div id="profileList"></div>
+        <div class="field"><input id="newProfile" placeholder="Name, e.g. the account's email" /><button class="btn ghost" id="addProfile">Add account</button></div>
+        <p class="msg" id="profileMsg"></p>
       </section>
 
       <section data-title="Toolkit">
@@ -159,7 +186,8 @@
         <label class="check"><input type="checkbox" id="autopilotBox" /> Autopilot on</label>
         <label>Make a Short every day at</label>
         <div class="field narrow"><input id="dailyTime" type="time" /></div>
-        <p class="muted small">Runs while the app is open, or as soon as you open it later that day. Clear the time to turn it off.</p>
+        <p class="muted small">Runs while the app is open, or as soon as you open it later that day. Clear the time to turn it off. Once a full week of Shorts is ready or on the way (see Uploads), it skips a day.</p>
+        <label class="check"><input type="checkbox" id="backlogAuto" /> Keep the story backlog topped up (Scripty researches a few stories at once, at most once a day)</label>
       </section>
 
       <section data-title="Agents">
@@ -181,6 +209,9 @@
           <select data-effort="publisher"></select>
         </div>
         <div id="effortBox" hidden></div>
+        <h3 class="sub">Budget guard</h3>
+        <p class="muted small">With more than one team on an account: above this share of the plan's current window only the first team starts new jobs, so it can finish its Short. When the limit is reached, every team waits and picks up by itself after the reset.</p>
+        <div class="field narrow"><select id="budgetGuard"><option value="0">Off</option><option value="0.7">70%</option><option value="0.8">80%</option><option value="0.9">90%</option></select></div>
       </section>
 
       <section data-title="Rendering">
@@ -189,8 +220,43 @@
         <div class="row"><button class="btn ghost" id="setupRender">Set up rendering</button><button class="btn ghost" id="openOutput">Open video folder</button><button class="btn ghost" id="openLog">Open log</button></div>
         <p class="msg" id="setupMsg"></p>
         <pre id="setupLog" hidden></pre>
+        <label>Render videos into</label>
+        <div class="field"><input id="renderDir" readonly /><button class="btn ghost" id="pickRender">Change…</button><button class="btn ghost" id="resetRender">Default</button></div>
+        <p class="msg" id="renderDirMsg"></p>
         <label>Python command</label>
         <div class="field narrow"><input id="python" placeholder="python" /></div>
+      </section>
+
+      <section data-title="Uploads">
+        <h3>Weekly uploads <span class="state" id="quotaState"></span></h3>
+        <p class="muted">You upload the Shorts yourself: each one that's ready is moved into <b>Week 01</b>, <b>Week 02</b>… folders with its title, description and tags, one per upload day.</p>
+        <label>Upload days (how many = Shorts per week)</label>
+        <div class="days" id="setDays"></div>
+        <div class="field narrow"><select id="quotaPreset"><option value="">Quick pick…</option><option value="7">7 a week (every day)</option><option value="5">5 a week (best days)</option><option value="3">3 a week (best days)</option></select></div>
+        <label>Week folders go in</label>
+        <div class="field"><input id="weeksDir" readonly /><button class="btn ghost" id="pickWeeks">Change…</button><button class="btn ghost" id="resetWeeks">Default</button></div>
+        <p class="msg" id="weeksDirMsg"></p>
+        <label>Remind me on upload days</label>
+        <div class="field narrow"><select id="remindMinutes"><option value="0">Off</option><option value="60">1 hour before the posting time</option><option value="120">2 hours before</option><option value="240">4 hours before</option></select></div>
+        <p class="muted small">Posting times and the audience time zone are under Publishing; each Short's text file says when to post it.</p>
+      </section>
+
+      <section data-title="Notifications">
+        <h3>Notifications</h3>
+        <p class="muted">The studio tells you when a Short is ready to upload, on upload days, when a week is full, when something fails or needs you, and when the plan limit pauses work.</p>
+        <label class="check"><input type="checkbox" id="notifyDesktop" /> Windows notifications</label>
+        <label>Phone notifications (ntfy)</label>
+        <div class="field"><input id="ntfyTopic" placeholder="a private topic name, e.g. oopsmith-7f3k2q" /><button class="btn ghost" id="testNotify">Send a test</button></div>
+        <p class="muted small">Free, no account: install the <b>ntfy</b> app (Android / iPhone), tap <b>+</b>, subscribe to the same topic name. Pick a hard-to-guess name: anyone who knows it can read it.</p>
+        <p class="msg" id="notifyMsg"></p>
+      </section>
+
+      <section data-title="Studio">
+        <h3>Studio</h3>
+        <label class="check"><input type="checkbox" id="dayNight" /> Light the studio by the real time of day (sunrise, evening lamps, stars at night)</label>
+        <h3 class="sub">Hall of Fame</h3>
+        <p class="muted small">Upgrades for the lounge, unlocked by Shorts that are out. The team celebrates every one you post.</p>
+        <ul class="fame" id="fameList"></ul>
       </section>
 
       <section data-title="Publishing">
@@ -209,7 +275,7 @@
           <div class="field"><button class="btn ghost" id="ytSecret">1. Choose client_secret.json…</button><button class="btn ghost" id="ytSignIn">2. Sign in to YouTube</button></div>
           <pre id="ytLog" hidden></pre>
         </div>
-        <div id="pubManual" hidden><p class="muted small">Pip still writes the title, description and tags for every approved Short (see the review screen). Post it however you like, then press <b>I posted it myself</b> on the review screen so the daily schedule keeps that day.</p></div>
+        <div id="pubManual" hidden><p class="muted small">Pip still writes the title, description and tags for every approved Short (see the review screen). Each Short that's ready is moved into its week's folder (Settings → Uploads) with a text file to copy from. Upload it, then press <b>Mark as posted</b> on the review screen.</p></div>
         <div id="pubBuffer" hidden>
         <p class="muted small">The app puts the video online and schedules it as a YouTube Short in your Buffer account. Connect your YouTube channel inside Buffer first.</p>
         <label class="small muted" for="bufferKey">1. Buffer API key (Buffer → Settings → API, or publish.buffer.com/settings/api)</label>

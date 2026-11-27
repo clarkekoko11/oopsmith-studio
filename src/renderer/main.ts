@@ -1,9 +1,9 @@
 // Wires the 3D office to the chat drawer, top bar and settings.
-import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type AgentInfo, type ChatItem, type ShortRow, type StudioApi, type TeamConfig, type TeamId, type TokenCount, type UpdateInfo, type UsageState } from '../shared/types';
+import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type AgentInfo, type BacklogCard, type CelebrateEvent, type ChatItem, type GuardState, type PlanState, type ProfileState, type Settings, type ShortRow, type StudioApi, type TeamConfig, type TeamId, type TokenCount, type UpdateInfo, type UsageState } from '../shared/types';
 import { Office, type CameraMode } from './office/game';
 import { renderMarkdown } from './ui/markdown';
 import { mockApi } from './ui/mock';
-import { STATION_COLORS, TEAM_ACCENTS } from './office/world';
+import { MILESTONES, STATION_COLORS, TEAM_ACCENTS } from './office/world';
 
 declare global {
   interface Window { studio?: StudioApi; __office?: Office }
@@ -81,7 +81,10 @@ $('#autopilot').addEventListener('click', async () => {
 });
 $('#autopilotBox').addEventListener('change', async (e) => showAutopilot((await api.saveSettings({ autopilot: (e.target as HTMLInputElement).checked })).autopilot));
 $('#dailyTime').addEventListener('change', (e) => api.saveSettings({ dailyTime: (e.target as HTMLInputElement).value }));
-$('#runToday').addEventListener('click', () => void api.runDaily(active));
+$('#runToday').addEventListener('click', async () => {
+  const r = await api.runDaily(active);
+  if (r !== 'started') toast('Not started', r === 'busy' ? 'Scripty is busy right now.' : r);
+});
 
 function refreshAgent(team: TeamId, a: AgentInfo) {
   if (a.id === 'script-writer' && team === active) ($('#runToday') as HTMLButtonElement).disabled = a.status === 'working' || a.status === 'needs-you';
@@ -131,6 +134,8 @@ function closeChat() {
 $('#closeChat').addEventListener('click', closeChat);
 window.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && !$('#review').hidden) return closeReview();
+  if (e.key === 'Escape' && !$('#weeks').hidden) return closeWeeks();
+  if (e.key === 'Escape' && !$('#backlog').hidden) return closeBacklog();
   if (e.key === 'Escape' && !$('#teams').hidden) return closeTeams();
   if (e.key === 'Escape' && open && !document.pointerLockElement && $('#settings').hidden) closeChat();
 });
@@ -297,6 +302,8 @@ async function updateBanner(a: AccountState | null = lastAccount, busyMsg: strin
   if (a?.apiKeyInEnv) msgs.push('An ANTHROPIC_API_KEY is set on this PC. The app ignores it and uses your Claude plan login.');
   if (busyMsg) msgs.unshift(busyMsg);
   if (blockedMsg) msgs.push(blockedMsg);
+  const g = guard.get(active);
+  if (g) msgs.push(`${teams.length > 1 ? `${teamName(active)} is paused: ` : 'Paused: '}${g}`);
   if (toolkitProblem) msgs.push(toolkitProblem);
   else if (!toolkitBusy && !s.hasGeminiKey) msgs.push('Add your Gemini API key so Scripty can make voiceovers.');
   else if (!toolkitBusy && !s.renderReady) msgs.push('Set up rendering once so Cutter can build and render (Settings → Rendering).');
@@ -311,8 +318,15 @@ async function updateBanner(a: AccountState | null = lastAccount, busyMsg: strin
 }
 api.onAccount(showAccount);
 void api.getAccount().then(showAccount);
+const usageBy = new Map<string, UsageState>();
+const teamProfileOf = (t: TeamId) => teams.find((x) => x.id === t)?.profile ?? '';
 api.onUsage((u: UsageState) => {
+  usageBy.set(u.profile ?? '', u);
+  if ((u.profile ?? '') === teamProfileOf(active)) showUsage(u);
+});
+function showUsage(u: UsageState | undefined) {
   const el = $('#usage');
+  if (!u) { el.hidden = true; return; }
   el.hidden = u.utilization === undefined && !u.status;
   const pct = Math.round((u.utilization ?? (u.status === 'rejected' ? 1 : 0)) * 100);
   (el.querySelector('.meter i') as HTMLElement).style.width = pct + '%';
@@ -320,7 +334,7 @@ api.onUsage((u: UsageState) => {
   el.classList.toggle('warn', u.status === 'allowed_warning');
   el.classList.toggle('full', u.status === 'rejected');
   el.title = `Claude plan usage (${u.window?.replace('_', '-') ?? 'current window'})${u.resetsAt ? ` · resets ${new Date(u.resetsAt * (u.resetsAt < 1e12 ? 1000 : 1)).toLocaleString()}` : ''}`;
-});
+}
 
 // ---------------- settings (side menu, one section at a time)
 const sections = [...document.querySelectorAll<HTMLElement>('.set-body section')];
@@ -362,6 +376,16 @@ async function openSettings(section?: string) {
   ($('#geminiKey') as HTMLInputElement).value = '';
   ($('#geminiKey') as HTMLInputElement).placeholder = s.hasGeminiKey ? '•••••••• saved (paste a new one to replace)' : 'Paste key from Google AI Studio';
   $('#geminiMsg').textContent = '';
+  ($('#budgetGuard') as HTMLSelectElement).value = String(s.budgetGuard ?? 0.8);
+  ($('#backlogAuto') as HTMLInputElement).checked = s.backlogAuto;
+  ($('#notifyDesktop') as HTMLInputElement).checked = s.notifyDesktop;
+  ($('#ntfyTopic') as HTMLInputElement).value = s.ntfyTopic;
+  ($('#remindMinutes') as HTMLSelectElement).value = String(s.remindMinutes);
+  ($('#dayNight') as HTMLInputElement).checked = s.dayNight;
+  renderDays($('#setDays'), s.postingDays);
+  void api.folders().then((f) => { ($('#renderDir') as HTMLInputElement).value = f.render; ($('#weeksDir') as HTMLInputElement).value = f.weeks; });
+  renderFame();
+  void api.listProfiles().then(renderProfiles);
   $('#settings').hidden = false;
   office.inputEnabled = false;
 }
@@ -453,7 +477,9 @@ async function showPublishing() {
   $('#pubYouTube').hidden = s.publishVia !== 'youtube';
   $('#pubBuffer').hidden = s.publishVia !== 'buffer';
   $('#pubManual').hidden = s.publishVia !== 'manual';
-  $('#pubSchedule').hidden = s.publishVia === 'manual';
+  // posting times matter in every mode (they set the upload days when you post yourself)
+  $('#pubSchedule').hidden = false;
+  for (const id of ['#ytMode', '#ytAuto', '#ytCategory']) ($(id).closest('label') as HTMLElement).hidden = s.publishVia === 'manual';
   if (s.publishVia === 'youtube') {
     const y = await api.youtubeStatus(active);
     ($('#ytSignIn') as HTMLButtonElement).textContent = y.signedIn ? '2. Signed in (sign in again)' : '2. Sign in to YouTube';
@@ -648,12 +674,17 @@ async function loadBoard(team?: TeamId) {
     // each line's review screen plays its newest rendered Short
     const latest = rows.find((r) => r.file);
     office.setReviewVideo(t, latest?.file ? await api.fileUrl(t, latest.file, 'video') : null);
+    postedBy.set(t, rows.filter((r) => /^(published|published_manual)$/.test(r.status)).length);
+    void api.getBacklog(t).then((cards) => { office.setCork(t, cards); if (t === active && !$('#backlog').hidden) renderCards(cards); });
     if (t === active) {
       boardRows = rows;
       if (!$('#review').hidden) renderReviewList();
     }
   }
+  office.setMilestones([...postedBy.values()].reduce((a, b) => a + b, 0));
+  void api.getPlan().then(showPlan);
 }
+const postedBy = new Map<TeamId, number>();
 
 // ---------------- review screen
 let reviewing: string | null = null;
@@ -739,10 +770,17 @@ async function showReview(id: string) {
   ($('#markPosted') as HTMLButtonElement).hidden = posted;
   ($('#postedAt') as HTMLInputElement).hidden = posted;
   ($('#unmarkPosted') as HTMLButtonElement).hidden = !posted;
-  ($('#postedBox').querySelector('span') as HTMLElement).textContent = posted ? 'You posted this yourself.' : 'Posted it yourself?';
+  ($('#postedBox').querySelector('span') as HTMLElement).textContent = posted ? 'You posted this one.' : 'Uploaded it?';
   const decided = /approved|ready_to_publish|queued|uploaded|published|draft_in_buffer/.test(info.status);
   ($('#approveBtn') as HTMLButtonElement).textContent = decided ? 'Approved' : 'Approve';
   ($('#approveBtn') as HTMLButtonElement).disabled = decided;
+  const plan = info.plan;
+  $('#planBox').hidden = !plan;
+  if (plan) {
+    $('#planWhen').textContent = `Week ${plan.week} · ${fmtDay(plan.day)}${plan.posted ? ' · posted' : ''}`;
+    $('#planWhere').textContent = plan.video ?? '';
+    ($('#planOpen') as HTMLButtonElement).onclick = () => void api.openWeek(plan.week);
+  }
   const pa = $('#postedAt') as HTMLInputElement;
   const d = info.publishAt ? new Date(info.publishAt) : new Date();
   pa.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
@@ -864,6 +902,8 @@ function setActive(team: TeamId) {
   if (changed) {
     reviewing = null;
     void api.listShorts(team).then((r) => (boardRows = r));
+    showUsage(usageBy.get(teamProfileOf(team)));
+    void updateBanner();
   }
 }
 async function applyTeams(list: TeamConfig[]) {
@@ -898,14 +938,23 @@ function renderTeams() {
     const row = document.createElement('div');
     row.className = 'team-row' + (t.id === active ? ' on' : '');
     row.style.setProperty('--team', TEAM_ACCENTS[i % TEAM_ACCENTS.length]);
-    row.innerHTML = `<span class="swatch"></span><div class="team-fields"><input class="tname" aria-label="Team name" /><div class="field"><input class="trepo" aria-label="Toolkit repo" placeholder="owner/repo" /></div><div class="muted small tstat"></div></div><div class="team-btns"><button class="ghost go">Go there</button><button class="ghost rm">Remove</button></div>`;
+    row.innerHTML = `<span class="swatch"></span><div class="team-fields"><input class="tname" aria-label="Team name" /><div class="field"><input class="trepo" aria-label="Toolkit repo" placeholder="owner/repo" /><select class="tprof" aria-label="Claude account" title="Claude account this team runs on"></select></div><div class="muted small tstat"></div></div><div class="team-btns"><button class="ghost go">Go there</button><button class="ghost rm">Remove</button></div>`;
+    const prof = row.querySelector('.tprof') as HTMLSelectElement;
+    for (const p of profiles) {
+      const o = document.createElement('option');
+      o.value = p.id;
+      o.textContent = `${p.id ? p.name : 'Default login'}${p.account.signedIn ? '' : ' (not signed in)'}`;
+      prof.appendChild(o);
+    }
+    prof.value = t.profile ?? '';
+    prof.onchange = async () => void applyTeams(await api.setTeamProfile(t.id, prof.value));
     const name = row.querySelector('.tname') as HTMLInputElement;
     name.value = t.name;
     name.onchange = async () => void applyTeams(await api.renameTeam(t.id, name.value));
     const repo = row.querySelector('.trepo') as HTMLInputElement;
     repo.value = t.toolkitRepo;
     repo.onchange = async () => { teams = await api.setTeamRepo(t.id, repo.value); await api.cloneToolkit(t.id); };
-    row.querySelector('.tstat')!.textContent = `${teamStatus(t.id)} · ${t.toolkitPath}`;
+    row.querySelector('.tstat')!.textContent = `${guard.get(t.id) ? `Paused: ${guard.get(t.id)}` : teamStatus(t.id)} · ${t.toolkitPath}`;
     (row.querySelector('.go') as HTMLButtonElement).onclick = () => { setActive(t.id); office.focusTeam(t.id); closeTeams(); };
     const rm = row.querySelector('.rm') as HTMLButtonElement;
     rm.hidden = t.id === MAIN_TEAM;
@@ -942,3 +991,332 @@ $('#addTeamBtn').addEventListener('click', async () => {
   teamMsg(res);
   if (res.ok) { n.value = ''; r.value = ''; }
 });
+
+// ---------------- toasts (celebrations and quick messages)
+let toastTimer: ReturnType<typeof setTimeout> | undefined;
+function toast(title: string, text: string, tone: 'good' | 'info' = 'info') {
+  const t = $('#toast');
+  t.querySelector('b')!.textContent = title;
+  t.querySelector('span')!.textContent = text;
+  t.className = tone;
+  t.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => (t.hidden = true), 7000);
+}
+$('#toast').addEventListener('click', () => ($('#toast').hidden = true));
+
+const fmtDay = (day: string) => new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short', day: 'numeric', month: 'short' }).format(new Date(`${day}T12:00:00Z`));
+const fmtRange = (a: string, b: string) => {
+  const f = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', day: 'numeric', month: 'short' });
+  return `${f.format(new Date(`${a}T12:00:00Z`))} – ${f.format(new Date(`${b}T12:00:00Z`))}`;
+};
+
+// ---------------- weekly quota: upload days
+type Day = Settings['postingDays'][number];
+const WEEK: Day[] = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+const RANK: Day[] = ['fri', 'thu', 'tue', 'sat', 'wed', 'mon', 'sun'];
+function renderDays(box: HTMLElement, on: Day[]) {
+  box.innerHTML = '';
+  for (const d of WEEK) {
+    const b = document.createElement('button');
+    b.className = 'day' + (on.includes(d) ? ' on' : '');
+    b.textContent = d[0].toUpperCase() + d.slice(1);
+    b.setAttribute('aria-pressed', String(on.includes(d)));
+    b.onclick = async () => {
+      const cur = (await api.getSettings()).postingDays;
+      const next = cur.includes(d) ? cur.filter((x) => x !== d) : [...cur, d];
+      if (!next.length) return toast('At least one day', 'Keep at least one upload day.');
+      await setDays(next);
+    };
+    box.appendChild(b);
+  }
+}
+async function setDays(days: Day[]) {
+  const p = await api.setPostingDays(WEEK.filter((d) => days.includes(d)));
+  const s = await api.getSettings();
+  renderDays($('#setDays'), s.postingDays);
+  renderDays($('#weekDays'), s.postingDays);
+  showPlan(p);
+}
+$('#quotaPreset').addEventListener('change', async (e) => {
+  const n = Number((e.target as HTMLSelectElement).value);
+  (e.target as HTMLSelectElement).value = '';
+  if (n) await setDays(RANK.slice(0, n));
+});
+
+// ---------------- the weekly plan: top bar chip + Upload weeks panel
+let plan: PlanState | null = null;
+function showPlan(p: PlanState) {
+  plan = p;
+  const chip = $('#weekBtn');
+  const cur = p.weeks.find((w) => w.week === p.current);
+  chip.hidden = false;
+  chip.querySelector('span')!.textContent = `Week ${p.current}`;
+  const filed = cur?.entries.length ?? 0;
+  const posted = cur?.entries.filter((e) => e.posted).length ?? 0;
+  chip.querySelector('b')!.textContent = `${filed}/${p.quota}`;
+  chip.classList.toggle('full', filed >= p.quota);
+  chip.title = `Week ${p.current}: ${filed} of ${p.quota} Shorts filed, ${posted} posted · ${p.inProduction} being made`;
+  $('#quotaState').textContent = `${p.quota} a week`;
+  if (!$('#weeks').hidden) renderWeeks();
+}
+api.onPlan(showPlan);
+function renderWeeks() {
+  if (!plan) return;
+  $('#quotaLabel').textContent = `${plan.quota} Short${plan.quota === 1 ? '' : 's'} a week · ${plan.inProduction} being made now`;
+  $('#weeksPath').textContent = plan.weeksDir;
+  const box = $('#weekList');
+  box.innerHTML = '';
+  if (!plan.weeks.length) {
+    box.innerHTML = '<p class="empty-note">No Shorts filed yet. The first one that\'s approved and has its upload details starts Week 1.</p>';
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  for (const w of [...plan.weeks].reverse()) {
+    const sec = document.createElement('section');
+    sec.className = 'week' + (w.week === plan.current ? ' current' : '');
+    const posted = w.entries.filter((e) => e.posted).length;
+    sec.innerHTML = `<header><h3></h3><span class="muted small range"></span><span class="meter"><i></i></span><span class="small count"></span><button class="btn ghost sm open">Open</button></header><ol></ol>`;
+    sec.querySelector('h3')!.textContent = `Week ${String(w.week).padStart(2, '0')}${w.week === plan.current ? ' · this week' : ''}`;
+    sec.querySelector('.range')!.textContent = fmtRange(w.start, w.end);
+    (sec.querySelector('.meter i') as HTMLElement).style.width = `${Math.min(100, (w.entries.length / w.quota) * 100)}%`;
+    sec.querySelector('.count')!.textContent = `${w.entries.length}/${w.quota} filed · ${posted} posted`;
+    (sec.querySelector('.open') as HTMLButtonElement).onclick = () => void api.openWeek(w.week);
+    const ol = sec.querySelector('ol')!;
+    for (const e of w.entries) {
+      const li = document.createElement('li');
+      const late = !e.posted && e.day < today;
+      li.className = e.posted ? 'posted' : late ? 'late' : '';
+      li.innerHTML = `<span class="d"></span><span class="id"></span><span class="t"></span><span class="pill sm"></span>`;
+      li.querySelector('.d')!.textContent = fmtDay(e.day);
+      li.querySelector('.id')!.textContent = e.id;
+      li.querySelector('.t')!.textContent = e.title;
+      const pill = li.querySelector('.pill') as HTMLElement;
+      pill.textContent = e.posted ? 'Posted' : late ? 'Not posted yet' : e.day === today ? 'Upload today' : 'Ready';
+      pill.classList.add(e.posted ? 'good' : late ? 'bad' : e.day === today ? 'wait' : 'good');
+      li.onclick = () => { closeWeeks(); setActive(e.team); void openReview().then(() => showReview(e.id)); };
+      ol.appendChild(li);
+    }
+    const open = w.quota - w.entries.length;
+    if (open > 0) {
+      const li = document.createElement('li');
+      li.className = 'empty';
+      li.innerHTML = '<span class="t"></span>';
+      li.querySelector('.t')!.textContent = `${open} open upload day${open === 1 ? '' : 's'}: filled as the next Shorts are approved`;
+      ol.appendChild(li);
+    }
+    box.appendChild(sec);
+  }
+}
+async function openWeeks() {
+  showPlan(await api.getPlan());
+  renderDays($('#weekDays'), (await api.getSettings()).postingDays);
+  renderWeeks();
+  $('#weeks').hidden = false;
+  office.inputEnabled = false;
+}
+function closeWeeks() {
+  $('#weeks').hidden = true;
+  office.inputEnabled = !open;
+}
+$('#weekBtn').addEventListener('click', () => void openWeeks());
+$('#closeWeeks').addEventListener('click', closeWeeks);
+$('#weeks').addEventListener('click', (e) => { if (e.target === $('#weeks')) closeWeeks(); });
+$('#openWeeksRoot').addEventListener('click', () => void api.openWeek(null));
+
+// ---------------- folders
+const folderMsg = (id: string, r: { ok: boolean; message: string }) => {
+  const m = $(id);
+  m.textContent = r.message;
+  m.className = `msg ${r.ok ? 'ok-text' : 'bad-text'}`;
+};
+async function chooseFolder(kind: 'render' | 'weeks', reset: boolean) {
+  const r = reset ? await api.resetFolder(kind) : await api.pickFolder(kind);
+  folderMsg(kind === 'render' ? '#renderDirMsg' : '#weeksDirMsg', r);
+  const f = await api.folders();
+  ($('#renderDir') as HTMLInputElement).value = f.render;
+  ($('#weeksDir') as HTMLInputElement).value = f.weeks;
+  if (r.ok) void loadBoard();
+}
+$('#pickRender').addEventListener('click', () => void chooseFolder('render', false));
+$('#resetRender').addEventListener('click', () => void chooseFolder('render', true));
+$('#pickWeeks').addEventListener('click', () => void chooseFolder('weeks', false));
+$('#resetWeeks').addEventListener('click', () => void chooseFolder('weeks', true));
+
+// ---------------- simple settings
+$('#budgetGuard').addEventListener('change', (e) => api.saveSettings({ budgetGuard: Number((e.target as HTMLSelectElement).value) }));
+$('#backlogAuto').addEventListener('change', (e) => api.saveSettings({ backlogAuto: (e.target as HTMLInputElement).checked }));
+$('#notifyDesktop').addEventListener('change', (e) => api.saveSettings({ notifyDesktop: (e.target as HTMLInputElement).checked }));
+$('#ntfyTopic').addEventListener('change', (e) => api.saveSettings({ ntfyTopic: (e.target as HTMLInputElement).value.trim() }));
+$('#remindMinutes').addEventListener('change', (e) => api.saveSettings({ remindMinutes: Number((e.target as HTMLSelectElement).value) }));
+$('#dayNight').addEventListener('change', async (e) => {
+  const on = (e.target as HTMLInputElement).checked;
+  office.setDayNight(on);
+  await api.saveSettings({ dayNight: on });
+});
+$('#testNotify').addEventListener('click', async () => {
+  await api.saveSettings({ ntfyTopic: ($('#ntfyTopic') as HTMLInputElement).value.trim() });
+  folderMsg('#notifyMsg', { ok: true, message: 'Sending…' });
+  folderMsg('#notifyMsg', await api.testNotify());
+});
+
+// ---------------- Hall of Fame (Settings → Studio)
+function renderFame() {
+  const n = [...postedBy.values()].reduce((a, b) => a + b, 0);
+  const ul = $('#fameList');
+  ul.innerHTML = '';
+  for (const m of MILESTONES) {
+    const li = document.createElement('li');
+    li.className = n >= m.at ? 'on' : '';
+    li.innerHTML = `<b></b><span></span><em></em>`;
+    li.querySelector('b')!.textContent = String(m.at);
+    li.querySelector('span')!.textContent = m.name;
+    li.querySelector('em')!.textContent = n >= m.at ? 'unlocked' : `${m.at - n} to go`;
+    ul.appendChild(li);
+  }
+}
+
+// ---------------- story backlog (click the corkboard by Scripty's desk)
+let cards: BacklogCard[] = [];
+function renderCards(list: BacklogCard[]) {
+  cards = list;
+  const box = $('#cardList');
+  box.innerHTML = '';
+  const ready = cards.filter((c) => c.status === 'ready');
+  const done = cards.filter((c) => c.status !== 'ready');
+  if (!ready.length) box.innerHTML = '<p class="empty-note">No stories waiting. Press <b>Research more stories</b>, or let autopilot fill it.</p>';
+  ready.forEach((c, i) => {
+    const el = document.createElement('article');
+    el.className = 'card' + (i === 0 ? ' first' : '');
+    el.innerHTML = `<div class="num"></div><div class="body"><h4></h4><p class="hook"></p><p class="muted small meta"></p><details><summary>Facts and sources</summary><p class="sum"></p><ul class="src"></ul></details></div><div class="acts"><button class="btn ghost sm up" title="Move up">Up</button><button class="btn ghost sm dn" title="Move down">Down</button><button class="btn ghost sm top">Make next</button><button class="btn primary sm make">Make it now</button><button class="btn ghost sm veto">Not this one</button></div>`;
+    el.querySelector('.num')!.textContent = i === 0 ? 'Next' : `#${i + 1}`;
+    el.querySelector('h4')!.textContent = c.title;
+    el.querySelector('.hook')!.textContent = c.hook;
+    el.querySelector('.meta')!.textContent = [c.id, c.when, `${c.sources?.length ?? 0} source${c.sources?.length === 1 ? '' : 's'}`].filter(Boolean).join(' · ');
+    el.querySelector('.sum')!.textContent = c.summary ?? '';
+    const src = el.querySelector('.src')!;
+    for (const x of c.sources ?? []) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      if (/^https?:\/\//.test(x.url)) a.href = x.url;
+      a.target = '_blank';
+      a.rel = 'noreferrer';
+      a.textContent = x.title || x.url;
+      li.appendChild(a);
+      src.appendChild(li);
+    }
+    const move = (to: number) => { const r = [...ready]; r.splice(i, 1); r.splice(Math.max(0, Math.min(r.length, to)), 0, c); void saveCards([...r, ...done]); };
+    (el.querySelector('.up') as HTMLButtonElement).disabled = i === 0;
+    (el.querySelector('.top') as HTMLButtonElement).disabled = i === 0;
+    (el.querySelector('.dn') as HTMLButtonElement).disabled = i === ready.length - 1;
+    (el.querySelector('.up') as HTMLButtonElement).onclick = () => move(i - 1);
+    (el.querySelector('.dn') as HTMLButtonElement).onclick = () => move(i + 1);
+    (el.querySelector('.top') as HTMLButtonElement).onclick = () => move(0);
+    (el.querySelector('.veto') as HTMLButtonElement).onclick = () => void saveCards(cards.map((x) => (x.id === c.id ? { ...x, status: 'vetoed' as const } : x)));
+    (el.querySelector('.make') as HTMLButtonElement).onclick = async () => {
+      const r = await api.makeFromCard(active, c.id);
+      $('#backlogMsg').textContent = r.message;
+      if (r.ok) toast('Scripty is on it', c.title);
+    };
+    box.appendChild(el);
+  });
+  if (done.length) {
+    const d = document.createElement('details');
+    d.className = 'done';
+    d.innerHTML = `<summary>Used and set aside (${done.length})</summary><ul></ul>`;
+    for (const c of done) {
+      const li = document.createElement('li');
+      li.innerHTML = '<span></span><button class="btn ghost sm">Put back</button>';
+      li.querySelector('span')!.textContent = `${c.id} · ${c.title} · ${c.status === 'used' ? `made as ${c.short ?? 'a Short'}` : 'set aside'}`;
+      const back = li.querySelector('button') as HTMLButtonElement;
+      back.hidden = c.status === 'used';
+      back.onclick = () => void saveCards(cards.map((x) => (x.id === c.id ? { ...x, status: 'ready' as const } : x)));
+      d.querySelector('ul')!.appendChild(li);
+    }
+    box.appendChild(d);
+  }
+}
+async function saveCards(next: BacklogCard[]) {
+  renderCards(next);
+  office.setCork(active, next);
+  const r = await api.saveBacklog(active, next);
+  $('#backlogMsg').textContent = r.message;
+}
+async function openBacklog(team: TeamId) {
+  setActive(team);
+  $('#backlogTitle').textContent = teams.length > 1 ? `Story backlog · ${teamName(team)}` : 'Story backlog';
+  $('#backlogMsg').textContent = '';
+  renderCards(await api.getBacklog(team));
+  $('#backlog').hidden = false;
+  office.inputEnabled = false;
+}
+function closeBacklog() {
+  $('#backlog').hidden = true;
+  office.inputEnabled = !open;
+}
+office.onBacklog = (team) => void openBacklog(team);
+$('#closeBacklog').addEventListener('click', closeBacklog);
+$('#backlog').addEventListener('click', (e) => { if (e.target === $('#backlog')) closeBacklog(); });
+$('#refillBtn').addEventListener('click', async () => {
+  const r = await api.refillBacklog(active);
+  $('#backlogMsg').textContent = r.message;
+});
+api.onBacklog((team) => void api.getBacklog(team).then((c) => { office.setCork(team, c); if (team === active && !$('#backlog').hidden) renderCards(c); }));
+
+// ---------------- Claude accounts (Settings → Account) and per team (Teams)
+let profiles: ProfileState[] = [];
+function renderProfiles(list: ProfileState[]) {
+  profiles = list;
+  const box = $('#profileList');
+  box.innerHTML = '';
+  for (const p of list.filter((x) => x.id)) {
+    const row = document.createElement('div');
+    row.className = 'profile-row';
+    row.innerHTML = `<div><b></b><span class="muted small st"></span></div><div class="btns"><button class="btn ghost sm in">Sign in</button><button class="btn ghost sm chk">Check</button><button class="btn ghost sm rm">Remove</button></div>`;
+    row.querySelector('b')!.textContent = p.name;
+    const a = p.account;
+    const used = teams.filter((t) => (t.profile ?? '') === p.id).map((t) => t.name);
+    row.querySelector('.st')!.textContent = `${!a.checked ? 'not checked yet' : a.signedIn ? `${a.email ?? 'signed in'}${a.plan ? ` · ${a.plan}` : ''}` : 'not signed in'}${used.length ? ` · ${used.join(', ')}` : ''}${p.usage?.utilization !== undefined ? ` · ${Math.round(p.usage.utilization * 100)}% used` : ''}`;
+    (row.querySelector('.in') as HTMLButtonElement).onclick = async () => folderMsg('#profileMsg', await api.loginProfile(p.id));
+    (row.querySelector('.chk') as HTMLButtonElement).onclick = async () => { folderMsg('#profileMsg', { ok: true, message: 'Checking…' }); renderProfiles(await api.recheckProfile(p.id)); folderMsg('#profileMsg', { ok: true, message: '' }); };
+    (row.querySelector('.rm') as HTMLButtonElement).onclick = async () => folderMsg('#profileMsg', await api.removeProfile(p.id));
+    box.appendChild(row);
+  }
+  if (!$('#teams').hidden) renderTeams();
+}
+api.onProfiles(renderProfiles);
+$('#addProfile').addEventListener('click', async () => {
+  const i = $('#newProfile') as HTMLInputElement;
+  const r = await api.addProfile(i.value);
+  folderMsg('#profileMsg', r);
+  if (r.ok) i.value = '';
+});
+
+// ---------------- budget guard: which teams are waiting
+const guard = new Map<TeamId, string>();
+function showGuard(list: GuardState[]) {
+  guard.clear();
+  for (const g of list) if (g.paused) guard.set(g.team, g.paused);
+  if (!$('#teams').hidden) renderTeams();
+  void updateBanner();
+}
+api.onGuard(showGuard);
+
+// ---------------- celebrations
+api.onCelebrate((c: CelebrateEvent) => {
+  office.celebrate(c.kind === 'week' || c.kind === 'milestone' ? null : c.team);
+  const title = c.kind === 'posted' ? 'Out in the world' : c.kind === 'published' ? 'Live on YouTube' : c.kind === 'week' ? 'Week complete' : 'Studio upgrade';
+  toast(title, c.text, 'good');
+  void loadBoard();
+});
+
+// ---------------- start-up for the new parts
+void (async () => {
+  const s = await api.getSettings();
+  office.setDayNight(s.dayNight);
+  showPlan(await api.getPlan());
+  showGuard(await api.getGuard());
+  profiles = await api.listProfiles();
+  const def = profiles.find((p) => p.id === teamProfileOf(active));
+  if (def?.usage) showUsage(def.usage);
+})();

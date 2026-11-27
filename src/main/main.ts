@@ -1,21 +1,28 @@
 // Electron main process: window, IPC, settings, account check and agents.
 import { app, BrowserWindow, dialog, ipcMain, net, protocol, shell } from 'electron';
 import { spawn } from 'node:child_process';
-import { appendFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { existsSync, readFileSync } from 'node:fs';
+import { copyFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type ShortRow, type TeamId, type UsageState } from '../shared/types';
+import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type CelebrateEvent, type GuardState, type ProfileState, type Settings, type ShortRow, type TeamId, type UsageState } from '../shared/types';
 import { checkAccount } from './account';
-import { DAILY_KICKOFF } from './agentDefs';
-import { Pipeline } from './pipeline';
+import { backlogKickoff, backlogRefill, DAILY_KICKOFF } from './agentDefs';
+import { IN_PRODUCTION, Pipeline, TAKES_A_DAY, type PipelineEvent } from './pipeline';
+import { BACKLOG_FILE, readBacklog, readyCards, writeBacklog } from './backlog';
+import { lastUsage, pausedReason, pendingResets, recordUsage, resetMs } from './guard';
+import { notify } from './notify';
+import { addProfile, listProfiles, profileEnv, profileName, removeProfile, setTeamProfile, teamProfile } from './profiles';
+import { dayKey, daysForQuota, describeSlot } from './schedule';
+import { allEntries, dueReminders, filedVideo, planEntry, planState, plannedDays, renderRoot, weekFolder, weeksRoot } from './weeks';
 import { applyUpdate, checkForUpdate } from './updater';
 import { allUsage, totalTokens } from './usage';
 import { disableWorkerUpload, listChannels } from './buffer';
 import { getSecret, hasSecret, setSecret } from './secrets';
 import { publishSetupMissing } from './pipeline';
 import { signInYouTube, useClientSecret, youtubeStatus } from './youtube';
-import { detectRenderReady, outputDir, setupRendering, shortsCmd, stopJob } from './render';
+import { detectRenderReady, outputDir, renderBusy, setOutputDir, setupRendering, shortsCmd, stopJob } from './render';
 import { basename } from 'node:path';
 import { cloneToolkit, commitAndPush, pullToolkit } from './git';
 import { claudeExecutable } from './sdk';
@@ -27,6 +34,10 @@ import { addTeam, listTeams, removeTeam, renameTeam, setTeamPath, setTeamRepo, s
 const here = dirname(fileURLToPath(import.meta.url));
 let win: BrowserWindow | undefined;
 let account: AccountState = { checked: false, signedIn: false, apiKeyInEnv: false };
+/** login state per Claude account ('' = this PC's default login) */
+const accounts = new Map<string, AccountState>();
+// Windows shows notifications under this name
+app.setAppUserModelId('com.oopsmith.studio');
 
 protocol.registerSchemesAsPrivileged([
   { scheme: 'toolkit', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
@@ -40,17 +51,31 @@ const helper = (f: string) => join(app.getAppPath(), 'resources', f).replace(`ap
 interface Crew { agents: AgentManager; pipeline: Pipeline }
 const crews = new Map<TeamId, Crew>();
 
+const NAMES: Record<AgentId, string> = { 'script-writer': 'Scripty', editor: 'Cutter', reviewer: 'Hawk', publisher: 'Pip' };
+const tname = (team: TeamId) => listTeams().find((t) => t.id === team)?.name ?? team;
+const multi = () => listTeams().length > 1;
+const who = (team: TeamId, agent: AgentId) => `${NAMES[agent]}${multi() ? ` (${tname(team)})` : ''}`;
+
 function makeCrew(team: TeamId): Crew {
   const agents = new AgentManager(
     team,
-    (e: AgentEvent) => send('agent:event', e),
-    (u: UsageState) => send('usage', u),
+    (e: AgentEvent) => {
+      send('agent:event', e);
+      // things worth a notification
+      if (e.type === 'status' && e.status === 'needs-you') void notify(`${who(team, e.agent)} needs you`, e.activity ?? 'Waiting for your OK in the studio.', 'urgent');
+      if (e.type === 'upsert' && e.item?.kind === 'notice' && e.item.tone === 'error') void notify(`${who(team, e.agent)}: something went wrong`, e.item.text.slice(0, 240), 'urgent');
+    },
+    (u: UsageState) => onUsage(u),
   );
   const pipeline = new Pipeline(team, agents, { upload: helper('yt_upload.py'), status: helper('yt_status.py') });
-  pipeline.onChange = () => send('board:changed', team);
+  pipeline.onChange = () => { send('board:changed', team); sendPlan(); };
+  pipeline.gate = () => pausedReason(team, listTeams());
+  pipeline.takenDays = () => takenDaysAll();
+  pipeline.onEvent = (e) => void onPipelineEvent(team, e);
   pipeline.onBlocked = (message) => {
     send('pipeline:blocked', { team, message });
     agents.post('editor', { kind: 'notice', tone: 'warn', text: message });
+    if (message) void notify(`${tname(team)} is waiting`, message, 'info');
     void autoDetectRendering(team);
   };
   agents.onUsage(() => send('board:changed', team));
@@ -75,6 +100,146 @@ const crew = (team: TeamId | undefined): Crew => crews.get(team || MAIN_TEAM) ??
 /** Any team's work can free the graphics card, so every finished job nudges every team. */
 const tickAll = async () => { for (const c of crews.values()) await c.pipeline.tick(); };
 
+// ---------------- registries of every team (for the weekly plan, quota and milestones)
+type RegShort = { id: string; status?: string; title?: string; topic?: string; publish_at?: string; file?: string; version?: number };
+function registryOf(team: TeamId): Record<string, RegShort> {
+  try { return JSON.parse(readFileSync(join(settingsFor(team).toolkitPath, 'shorts', 'registry.json'), 'utf8')).shorts ?? {}; } catch { return {}; }
+}
+/** Upload days already used: the weekly plan plus Shorts posted or scheduled another way, on every team. */
+function takenDaysAll(): Set<string> {
+  const tz = loadSettings().audienceTimezone;
+  const days = plannedDays();
+  for (const t of listTeams()) for (const m of Object.values(registryOf(t.id))) if (m.publish_at && TAKES_A_DAY.test(m.status ?? '')) days.add(dayKey(Date.parse(m.publish_at), tz));
+  return days;
+}
+/** Shorts still being made, on every team (ready-to-post ones not yet filed count too). */
+function inProduction(): number {
+  let n = 0;
+  for (const t of listTeams()) for (const m of Object.values(registryOf(t.id))) {
+    if (IN_PRODUCTION.test(m.status ?? '')) n++;
+    else if (m.status === 'ready_to_publish' && !planEntry(t.id, m.id)) n++;
+  }
+  return n;
+}
+const sendPlan = () => send('plan', planState(inProduction()));
+/** Shorts that are out (posted by you or published), all teams. */
+function postedCount(): number {
+  let n = 0;
+  for (const t of listTeams()) for (const m of Object.values(registryOf(t.id))) if (/^(published|published_manual)$/.test(m.status ?? '')) n++;
+  return n;
+}
+/** studio upgrades unlock at these counts (the office shows them; see world.ts) */
+const MILESTONES: [number, string][] = [
+  [1, 'the first Short is out: a gold plaque goes up in the lounge'],
+  [7, 'a full week of Shorts: the neon OOPS sign lights up'],
+  [25, '25 Shorts: the trophy shelf arrives'],
+  [50, '50 Shorts: a disco ball for the record corner'],
+  [100, '100 Shorts: the gold record goes on the wall'],
+];
+function checkMilestones(team: TeamId) {
+  const n = postedCount();
+  const s = loadSettings();
+  const hit = MILESTONES.filter(([at]) => at <= n && at > (s.milestoneSeen ?? 0));
+  if (!hit.length) return;
+  saveSettings({ milestoneSeen: hit[hit.length - 1][0] });
+  const [, what] = hit[hit.length - 1];
+  const text = `Studio upgrade: ${what}.`;
+  celebrate({ team, id: '', title: '', kind: 'milestone', text });
+  void notify('Studio upgrade unlocked', text, 'good');
+}
+const celebrate = (c: CelebrateEvent) => send('celebrate', c);
+
+async function onPipelineEvent(team: TeamId, e: PipelineEvent) {
+  const pre = multi() ? `${tname(team)}: ` : '';
+  if (e.type === 'filed') {
+    sendPlan();
+    void notify(`${e.id} is ready to upload`, `${pre}${e.title}. ${e.text.replace(`${e.id} is ready to upload. `, '')}`, 'info');
+    const p = planState(inProduction());
+    const w = p.weeks.find((x) => x.week === e.week);
+    if (e.fresh && w && w.entries.length >= w.quota) {
+      const text = `Week ${e.week} is ready: all ${w.quota} Shorts are in the folder.`;
+      celebrate({ team, id: e.id, title: e.title, kind: 'week', text });
+      void notify(`Week ${e.week} is ready`, text, 'good');
+    }
+  } else if (e.type === 'posted' || e.type === 'published') {
+    sendPlan();
+    celebrate({ team, id: e.id, title: e.title, kind: e.type, text: e.text });
+    void notify(e.type === 'posted' ? `${e.id} is out` : `${e.id} is live`, `${pre}${e.title}`, 'good');
+    checkMilestones(team);
+  } else if (e.type === 'failed') {
+    void notify(`${e.id}: publishing failed`, `${pre}${e.text}`, 'urgent');
+  }
+}
+
+// ---------------- Claude plan usage, the budget guard, and picking up after the limit resets
+const resetTimers = new Map<string, NodeJS.Timeout>();
+function guardStates(): GuardState[] {
+  const teams = listTeams();
+  return teams.map((t) => ({ team: t.id, paused: pausedReason(t.id, teams) }));
+}
+const sendGuard = () => send('guard', guardStates());
+function onUsage(u: UsageState) {
+  const before = guardStates();
+  recordUsage(u);
+  send('usage', u);
+  const after = guardStates();
+  sendGuard();
+  const prof = u.profile ?? '';
+  if (u.status === 'rejected') void notify('Claude plan limit reached', `${prof ? `${profileName(prof)}: ` : ''}work picks up by itself${u.resetsAt ? ` at ${new Date(resetMs(u.resetsAt)!).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}` : ' when it resets'}.`, 'info');
+  else if (after.some((g, i) => g.paused && !before[i]?.paused)) {
+    const g = after.find((x, i) => x.paused && !before[i]?.paused)!;
+    void notify(`${tname(g.team)} paused`, g.paused!, 'info');
+  }
+  scheduleResets();
+}
+function scheduleResets() {
+  for (const [prof, at] of pendingResets()) {
+    if (resetTimers.has(prof)) continue;
+    resetTimers.set(prof, setTimeout(() => {
+      resetTimers.delete(prof);
+      sendGuard();
+      const teams = listTeams().filter((t) => teamProfile(t.id) === prof);
+      for (const t of teams) {
+        const c = crews.get(t.id);
+        if (!c) continue;
+        c.pipeline.resetTries();
+        void resumeUnfinished(t.id, 'limit');
+      }
+      if (teams.length) void notify('Claude plan reset', `${teams.map((t) => t.name).join(', ')} ${teams.length === 1 ? 'is' : 'are'} back at work.`, 'info');
+      void tickAll();
+    }, Math.max(5_000, at - Date.now() + 60_000)));
+  }
+}
+
+/**
+ * Jobs that didn't finish: the app closed, the PC restarted, or the plan limit cut them off. Cutter, Hawk and Pip
+ * pick up from each Short's status by themselves; Scripty's daily run or backlog research is started again
+ * (a Short he already created an ID for is continued by the pipeline instead).
+ */
+async function resumeUnfinished(team: TeamId, why: 'restart' | 'limit') {
+  const c = crews.get(team);
+  if (!c) return;
+  for (const j of c.agents.unfinished()) {
+    if (why === 'restart' && j.limit && pausedReason(team, listTeams())) continue; // still over the limit: later
+    if (why === 'limit' && !j.limit) continue;
+    c.agents.clearUnfinished(j.agent);
+    if (Date.now() - j.at > 24 * 3600_000) continue; // too old to pick up
+    const auto = j.text.includes('[AUTOPILOT]');
+    const label = why === 'limit' ? 'after the plan limit reset' : 'after the app restarted';
+    if (j.agent === 'script-writer' && auto) {
+      const reg = registryOf(team);
+      const madeId = Object.values(reg).some((m) => /^(planned|scripted)$/.test(m.status ?? ''));
+      if (!madeId && /Make today's Short|Fill the story backlog/.test(j.text) && c.agents.isIdle('script-writer')) {
+        await c.agents.send('script-writer', j.text, `Picking up ${label}: ${j.display ?? 'the last job'}`, { fresh: true });
+        continue;
+      }
+    }
+    if (!auto) c.agents.post(j.agent, { kind: 'notice', tone: 'warn', text: `Your last message didn't finish (${label === 'after the app restarted' ? 'the app closed' : 'the plan limit was reached'}). Send it again if you still need it.` });
+    else c.agents.post(j.agent, { kind: 'notice', text: `Picking up ${label}: the desk continues from where each Short is.` });
+  }
+  void c.pipeline.tick();
+}
+
 /** If the render worker was already set up on this PC, mark rendering ready without re-running setup. */
 async function autoDetectRendering(team: TeamId = MAIN_TEAM) {
   const s = settingsFor(team);
@@ -98,10 +263,31 @@ async function doClone(team: TeamId) {
 }
 async function doSync(team: TeamId) {
   const s = settingsFor(team);
-  if (!existsSync(s.toolkitPath)) return doClone(team);
-  const r = await pullToolkit(s.toolkitPath);
-  toolkitStatus({ team, busy: false, ...r });
+  const r = existsSync(s.toolkitPath) ? await pullToolkit(s.toolkitPath) : await doClone(team);
+  if (existsSync(s.toolkitPath)) {
+    toolkitStatus({ team, busy: false, ...r });
+    // every team renders into the folder chosen in Settings → Rendering
+    if (s.renderDir) setOutputDir(s.toolkitPath, s.renderDir);
+  }
   return r;
+}
+
+/** Move the rendered videos every team's registry knows about from one render folder to another. */
+async function moveRenders(from: string[], to: string): Promise<number> {
+  mkdirSync(to, { recursive: true });
+  let n = 0;
+  for (const t of listTeams()) {
+    for (const m of Object.values(registryOf(t.id))) {
+      if (!m.file) continue;
+      const src = from.map((d) => join(d, m.file!)).find((p) => existsSync(p) && dirname(p) !== to);
+      if (!src) continue;
+      const dest = join(to, m.file);
+      if (existsSync(dest)) continue;
+      try { await rename(src, dest); } catch { try { await copyFile(src, dest); await unlink(src).catch(() => {}); } catch { continue; } }
+      n++;
+    }
+  }
+  return n;
 }
 
 function createWindow() {
@@ -145,6 +331,21 @@ function shorts(team: TeamId): ShortRow[] {
   }
 }
 
+function profileStates(): ProfileState[] {
+  return listProfiles().map((p) => ({ ...p, account: accounts.get(p.id) ?? (p.id ? { checked: false, signedIn: false, apiKeyInEnv: false } : account), usage: lastUsage(p.id) ?? undefined }));
+}
+// Opens a terminal running Claude Code so you can type /login (the app never sees your password).
+function openLogin(profile: string) {
+  const exe = claudeExecutable();
+  if (!exe) return { ok: false, message: 'Claude Code was not found. Re-run npm install in the app folder.' };
+  const env = { ...process.env, ...profileEnv(profile) } as NodeJS.ProcessEnv;
+  const title = profile ? `Claude sign-in: ${profileName(profile)}` : 'Claude sign-in';
+  if (process.platform === 'win32') spawn('cmd.exe', ['/d', '/s', '/c', `start "${title.replace(/"/g, '')}" cmd /k ""${exe}""`], { detached: true, windowsVerbatimArguments: true, env }).unref();
+  else if (process.platform === 'darwin') spawn('open', ['-a', 'Terminal', exe], { detached: true, env }).unref();
+  else spawn('x-terminal-emulator', ['-e', exe], { detached: true, env }).unref();
+  return { ok: true, message: `A terminal opened${profile ? ` for ${profileName(profile)}` : ''}. Type /login, sign in with that account, close it, then press Check again.` };
+}
+
 app.whenReady().then(() => {
   // toolkit://file/<relative path> serves files from the toolkit folder only (audio players in chat).
   protocol.handle('toolkit', (req) => {
@@ -155,7 +356,9 @@ app.whenReady().then(() => {
     if (url.host === 'video') {
       // finished renders, from the worker's output folder only
       const dir = outputDir(ts.toolkitPath);
-      const full = join(dir, basename(decodeURIComponent(rest.join('/'))));
+      const name = basename(decodeURIComponent(rest.join('/')));
+      // a Short that was filed into its week folder plays from there (so the render folder's copy isn't held open)
+      const full = filedVideo(decodeURIComponent(team), name) ?? join(dir, name);
       if (!existsSync(full)) return new Response('not found', { status: 404 });
       return net.fetch(pathToFileURL(full).toString(), { headers: req.headers });
     }
@@ -192,7 +395,7 @@ app.whenReady().then(() => {
     const row = shorts(team).find((r) => r.id === id);
     let review: string | null = null;
     try { review = readFileSync(join(s.toolkitPath, 'shorts', id, 'review.md'), 'utf8'); } catch { /* none yet */ }
-    const video = row?.file && existsSync(join(outputDir(s.toolkitPath), row.file)) ? `toolkit://video/${encodeURIComponent(team)}/${encodeURIComponent(row.file)}` : null;
+    const video = row?.file && (existsSync(join(outputDir(s.toolkitPath), row.file)) || filedVideo(team, row.file)) ? `toolkit://video/${encodeURIComponent(team)}/${encodeURIComponent(row.file)}` : null;
     let publish: string | null = null;
     try { publish = readFileSync(join(s.toolkitPath, 'shorts', id, 'publish.md'), 'utf8'); } catch { /* none yet */ }
     let m: { buffer_post_id?: string; youtube_id?: string; publish_at?: string } = {};
@@ -200,7 +403,7 @@ app.whenReady().then(() => {
     return {
       id, status: row?.status ?? '', waiting: pipeline.explain(id), review, publish,
       inBuffer: Boolean(m.buffer_post_id), youtubeId: m.youtube_id || null, publishAt: m.publish_at || null,
-      videoUrl: video, usage: allUsage(team)[id] ?? null,
+      videoUrl: video, usage: allUsage(team)[id] ?? null, plan: planEntry(team, id),
     };
   });
   // your own decision from the review screen overrides Hawk's
@@ -333,19 +536,118 @@ app.whenReady().then(() => {
   ipcMain.handle('agents:permission', (_e, team: TeamId, id: AgentId, permId: string, allow: boolean) => crew(team).agents.answer(id, permId, allow));
 
   ipcMain.handle('account:get', () => account);
-  ipcMain.handle('account:recheck', async () => (account = await checkAccount()));
-  // Opens a terminal running Claude Code so you can type /login (the app never sees your password).
-  ipcMain.handle('account:login', () => {
-    const exe = claudeExecutable();
-    if (!exe) return { ok: false, message: 'Claude Code was not found. Re-run npm install in the app folder.' };
-    if (process.platform === 'win32') spawn('cmd.exe', ['/d', '/s', '/c', `start "Claude sign-in" cmd /k ""${exe}""`], { detached: true, windowsVerbatimArguments: true }).unref();
-    else if (process.platform === 'darwin') spawn('open', ['-a', 'Terminal', exe], { detached: true }).unref();
-    else spawn('x-terminal-emulator', ['-e', exe], { detached: true }).unref();
-    return { ok: true, message: 'A terminal opened. Type /login, finish signing in, close it, then press Check again.' };
+  ipcMain.handle('account:recheck', async () => {
+    account = await checkAccount();
+    accounts.set('', account);
+    send('profiles', profileStates());
+    return account;
+  });
+  ipcMain.handle('account:login', () => openLogin(''));
+  // extra Claude accounts (one per team if you like)
+  ipcMain.handle('profiles:list', () => profileStates());
+  ipcMain.handle('profiles:add', (_e, name: string) => {
+    const r = addProfile(name);
+    send('profiles', profileStates());
+    return r;
+  });
+  ipcMain.handle('profiles:remove', (_e, id: string) => {
+    const r = removeProfile(id);
+    if (r.ok) accounts.delete(id);
+    send('profiles', profileStates());
+    return r;
+  });
+  ipcMain.handle('profiles:login', (_e, id: string) => openLogin(id));
+  ipcMain.handle('profiles:recheck', async (_e, id: string) => {
+    const a = await checkAccount(id);
+    accounts.set(id, a);
+    if (!id) { account = a; send('account', a); }
+    const p = profileStates();
+    send('profiles', p);
+    return p;
+  });
+  ipcMain.handle('teams:profile', (_e, team: TeamId, profile: string) => {
+    const before = teamProfile(team);
+    setTeamProfile(team, profile);
+    if (before !== teamProfile(team)) crew(team).agents.forgetSessions();
+    sendGuard();
+    void checkAccount(profile).then((a) => { accounts.set(profile, a); send('profiles', profileStates()); });
+    return teamsChanged();
   });
 
   ipcMain.handle('settings:get', () => loadSettings());
-  ipcMain.handle('settings:save', (_e, patch) => saveSettings(patch));
+  ipcMain.handle('settings:save', (_e, patch: Partial<Settings>) => {
+    const r = saveSettings(patch);
+    if ('budgetGuard' in patch) sendGuard();
+    if ('postingDays' in patch || 'audienceTimezone' in patch) sendPlan();
+    return r;
+  });
+
+  // ---- weekly plan and folders
+  ipcMain.handle('plan:get', () => planState(inProduction()));
+  ipcMain.handle('plan:days', (_e, days: Settings['postingDays']) => {
+    saveSettings({ postingDays: days?.length ? days : daysForQuota(7) });
+    const p = planState(inProduction());
+    send('plan', p);
+    return p;
+  });
+  ipcMain.handle('plan:open', async (_e, week: number | null) => {
+    const s = loadSettings();
+    const dir = week && s.weekOneStart ? weekFolder(s, week) : weeksRoot(s);
+    mkdirSync(dir, { recursive: true });
+    await shell.openPath(dir);
+    return dir;
+  });
+  ipcMain.handle('folders:get', () => ({ render: renderRoot(), weeks: weeksRoot() }));
+  const setFolder = async (kind: 'render' | 'weeks', dir: string) => {
+    if (kind === 'weeks') {
+      saveSettings({ weeksDir: dir });
+      sendPlan();
+      return { ok: true, message: `New Shorts are filed into ${weeksRoot()}. Weeks already filed stay where they are.`, path: weeksRoot() };
+    }
+    const old = listTeams().map((t) => outputDir(t.toolkitPath));
+    saveSettings({ renderDir: dir });
+    for (const t of listTeams()) setOutputDir(t.toolkitPath, dir);
+    const now = renderRoot();
+    const moved = await moveRenders(old, now);
+    for (const t of listTeams()) send('board:changed', t.id);
+    sendPlan();
+    return { ok: true, message: `Videos now render into ${now}.${moved ? ` Moved ${moved} earlier render${moved === 1 ? '' : 's'} there too.` : ''}`, path: now };
+  };
+  ipcMain.handle('folders:pick', async (_e, kind: 'render' | 'weeks') => {
+    if (kind === 'render' && renderBusy()) {
+      return { ok: false, message: 'A render is running. Change the folder after it finishes.' };
+    }
+    const r = await dialog.showOpenDialog(win!, { title: kind === 'render' ? 'Where should finished videos be rendered?' : 'Where should the Week folders go?', properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return { ok: false, message: 'No folder chosen.' };
+    return setFolder(kind, r.filePaths[0]);
+  });
+  ipcMain.handle('folders:reset', (_e, kind: 'render' | 'weeks') => setFolder(kind, ''));
+
+  // ---- story backlog
+  ipcMain.handle('backlog:get', (_e, team: TeamId) => readBacklog(settingsFor(team).toolkitPath));
+  ipcMain.handle('backlog:save', async (_e, team: TeamId, cards) => {
+    const s = settingsFor(team);
+    writeBacklog(s.toolkitPath, cards);
+    send('backlog', team);
+    const g = await commitAndPush(s.toolkitPath, [BACKLOG_FILE], 'Backlog: reordered by you');
+    return { ok: true, message: g.message };
+  });
+  ipcMain.handle('backlog:refill', async (_e, team: TeamId) => {
+    const c = crew(team);
+    if (!c.agents.isIdle('script-writer')) return { ok: false, message: 'Scripty is busy. Try again when he is free.' };
+    const left = readyCards(settingsFor(team).toolkitPath).length;
+    const n = Math.max(3, 5 - left);
+    await c.agents.send('script-writer', backlogRefill(n), `Research ${n} stories for the backlog`, { fresh: true, effort: 'medium' });
+    return { ok: true, message: `Scripty is researching ${n} stories. They show up on the corkboard as he adds them.` };
+  });
+  ipcMain.handle('backlog:make', async (_e, team: TeamId, card: string) => {
+    const r = await runDaily(team, 'manual', card);
+    return r === 'started' ? { ok: true, message: 'Scripty is making a Short from this story now.' } : { ok: false, message: r === 'busy' ? 'Scripty is busy. Try again when he is free.' : r };
+  });
+
+  // ---- notifications, guard
+  ipcMain.handle('notify:test', () => notify('Oopsmith Studio', 'Notifications work. You will hear from the studio when a Short is ready to upload or something needs you.', 'info', { force: true }));
+  ipcMain.handle('guard:get', () => guardStates());
   ipcMain.handle('settings:gemini', (_e, key: string) => {
     try {
       setGeminiKey(key);
@@ -412,12 +714,20 @@ app.whenReady().then(() => {
       app.quit();
     }, Number(process.env.OOPSMITH_SMOKE_MS ?? 12000));
   }
-  // get the latest toolkit: clone it on first run, pull it every start
-  win!.webContents.once('did-finish-load', () => { for (const t of listTeams()) void doSync(t.id); });
+  // get the latest toolkit (clone on first run, pull every start), then pick up anything that was cut off
+  win!.webContents.once('did-finish-load', () => {
+    for (const t of listTeams()) void doSync(t.id).then(() => resumeUnfinished(t.id, 'restart'));
+    sendGuard();
+    sendPlan();
+  });
+  scheduleResets();
   checkAccount().then((a) => {
     account = a;
+    accounts.set('', a);
     send('account', a);
+    send('profiles', profileStates());
   });
+  for (const p of listProfiles().filter((x) => x.id)) void checkAccount(p.id).then((a) => { accounts.set(p.id, a); send('profiles', profileStates()); });
 });
 
 // ---- daily autopilot run: once a day at settings.dailyTime (or the first time the app is open after it)
@@ -425,20 +735,56 @@ const today = () => {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
-async function runDaily(team: TeamId, reason: 'manual' | 'schedule') {
+/** Shorts ready or on their way, not yet posted: a full week's worth means the daily run can rest. */
+function aheadCount(): number {
+  const tz = loadSettings().audienceTimezone;
+  const todayKey = dayKey(Date.now(), tz);
+  return inProduction() + allEntries().filter((e) => !e.posted && e.day >= todayKey).length;
+}
+let quotaNoticeDay = '';
+/** 'started', 'busy' (Scripty is working), or why it didn't start. */
+async function runDaily(team: TeamId, reason: 'manual' | 'schedule', cardId?: string): Promise<string> {
   const { agents } = crew(team);
-  if (!agents.isIdle('script-writer')) return false;
-  return Boolean(await agents.send('script-writer', DAILY_KICKOFF, reason === 'schedule' ? "Daily run: make today's Short" : "Make today's Short", { fresh: true }));
+  if (!agents.isIdle('script-writer')) return 'busy';
+  const paused = pausedReason(team, listTeams());
+  if (paused && reason === 'schedule') return `Waiting: ${paused}`;
+  const s = loadSettings();
+  // the weekly quota: once a full week of Shorts is ready or being made, the daily run skips a day
+  if (reason === 'schedule' && !cardId && aheadCount() >= s.postingDays.length) {
+    if (quotaNoticeDay !== today()) {
+      quotaNoticeDay = today();
+      agents.post('script-writer', { kind: 'notice', text: `Skipping today's Short: ${aheadCount()} Shorts are already ready or on the way, a full week (${s.postingDays.length} a week). The daily run starts again when one is posted.` });
+    }
+    return 'quota';
+  }
+  const cards = readyCards(settingsFor(team).toolkitPath);
+  const card = cardId ? cards.find((c) => c.id === cardId) : cards[0];
+  if (cardId && !card) return 'That story is no longer on the backlog.';
+  const text = card ? backlogKickoff(card) : DAILY_KICKOFF;
+  const label = card ? `${reason === 'schedule' ? 'Daily run: ' : ''}Make a Short from ${card.id}: ${card.title}` : reason === 'schedule' ? "Daily run: make today's Short" : "Make today's Short";
+  return (await agents.send('script-writer', text, label, { fresh: true })) ? 'started' : 'not started';
 }
 setInterval(() => void tickAll(), 60_000);
 setInterval(() => {
   const s = loadSettings();
-  if (!s.autopilot || !/^\d{1,2}:\d{2}$/.test(s.dailyTime) || s.lastDailyRun === today() || !account.signedIn) return;
+  if (!s.autopilot || !/^\d{1,2}:\d{2}$/.test(s.dailyTime) || s.lastDailyRun === today()) return;
   const [h, m] = s.dailyTime.split(':').map(Number);
   const now = new Date();
   if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
-  // every team makes its own Short each day, in parallel
-  void Promise.all(listTeams().map((t) => runDaily(t.id, 'schedule'))).then((r) => { if (r.some(Boolean)) saveSettings({ lastDailyRun: today() }); });
+  // every team makes its own Short each day, in parallel (each on its own Claude account)
+  const ready = listTeams().filter((t) => (accounts.get(teamProfile(t.id)) ?? (teamProfile(t.id) ? undefined : account))?.signedIn);
+  if (!ready.length) return;
+  void Promise.all(ready.map((t) => runDaily(t.id, 'schedule'))).then((r) => {
+    if (r.every((x) => x !== 'busy' && !x.startsWith('Waiting'))) saveSettings({ lastDailyRun: today() });
+  });
+}, 60_000);
+// upload-day reminders when you post the Shorts yourself
+setInterval(() => {
+  const s = loadSettings();
+  if (s.publishVia !== 'manual') return;
+  for (const e of dueReminders()) {
+    void notify(`Upload today: ${e.id}`, `${e.title} · ${describeSlot(Date.parse(e.at), s.audienceTimezone)}. It's in Week ${e.week}'s folder.`, 'info');
+  }
 }, 60_000);
 
 app.on('window-all-closed', () => {

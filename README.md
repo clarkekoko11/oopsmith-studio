@@ -1,7 +1,8 @@
-# Oopsmith Studio — Phase 4
+# Oopsmith Studio
 
 A walkable 3D office where AI agents make your Oopsmith Shorts. All four desks are working:
 **Scripty, the Script Writer**, **Cutter, the Editor**, **Hawk, the Reviewer** and **Pip, the Publisher**.
+Every desk runs on Opus by default (Settings → Agents); thinking effort per desk keeps the tokens down.
 
 ## The studio
 A cozy creative loft in the Oopsmith brand (colours, Bricolage Grotesque + DM Sans, logos and posters from the brand
@@ -16,6 +17,62 @@ coffee (two at the bar start chatting), the sofa, arcade, books, watering plants
 the record player. Their bubble says what they're up to. The moment work arrives they walk back and start typing;
 an agent who needs you waves. Click anyone, wherever they are, to walk over and talk — they wait for you.
 
+**Day and night:** the studio follows your PC's clock: daylight through the factory windows, a warm glow at sunrise
+and sunset, lamps up and stars outside at night (Settings → Studio to keep the late-afternoon look instead).
+
+**Celebrations and the Hall of Fame:** when you mark a Short as posted (or it goes live), the team's free agents gather on
+the lounge rug and dance, the busy ones wave from their desks, and confetti comes down. A full week of Shorts gets one
+too. The Hall of Fame board in the lounge counts the Shorts that are out and unlocks upgrades: a gold plaque (1), the
+neon OOPS sign over the arcades (7), trophy cups (25), a disco ball over the record corner (50) and the gold record (100).
+
+## Weekly uploads (you post the Shorts yourself)
+**Settings → Publishing → Publish via** is **I post them myself** (the default). Every Short that's approved and has
+Pip's upload details is **moved into its week's folder** with a text file of everything to paste into YouTube Studio:
+
+```
+Videos\Oopsmith weeks\
+  Week 01 (Nov 30 - Dec 6)\
+    2026-12-01 Tue - RS-0012 - Why This Jet Ran Out of Fuel.mp4
+    2026-12-01 Tue - RS-0012 - Why This Jet Ran Out of Fuel.txt   title, other titles, description, tags, when to post
+```
+- **Weekly quota:** Settings → Uploads → **Upload days**. The number of days you tick is the number of Shorts per week
+  (Quick pick: 7, 5 or 3 on the best days). Each Short gets the next free upload day, at that day's posting time
+  (Settings → Publishing), and the week's folder it lands in follows from that day. Week 1 starts the Monday of the
+  first filed Short.
+- **The daily run keeps pace with the quota:** once a full week of Shorts is ready or on the way, it skips a day.
+- **Week chip** in the top bar (Week 3 · 4/7) opens **Upload weeks**: every week, what's filed, what's posted, what's
+  late, and open slots. Click a Short to open it on the review screen.
+- After uploading, press **Mark as posted** on the review screen: the files get " (posted)" added to their names, so the
+  folder shows what's left. The review screen's Upload details tab shows the Short's week and day and opens its folder.
+- **Where:** Settings → Uploads → Week folders go in (default `Videos\Oopsmith weeks`), and Settings → Rendering →
+  **Render videos into** (default `Videos\RobloxShorts`; it sets every team's render worker, and earlier renders move with it).
+- Reminders on upload days (Settings → Uploads, default 2 hours before the posting time).
+
+## Story backlog
+Click the **corkboard** by Scripty's desk. Scripty researches several true stories at once (lighter thinking, about three
+searches each, every key fact in two sources) and pins them there; the daily run takes the top card and re-opens its
+sources instead of searching from scratch. Reorder (Up / Down / Make next), set one aside (Not this one), make one right
+now, or ask for more. With **Keep the story backlog topped up** (Settings → Autopilot) he refills it by himself when fewer
+than 3 are left, at most once a day. The backlog lives in the team's toolkit at `shorts/backlog.json`.
+
+## Notifications
+Windows notifications and, if you like, your phone through **ntfy** (free, no account: install the ntfy app, subscribe to
+a hard-to-guess topic, and put the same topic in Settings → Notifications; **Send a test** checks it). You hear when a
+Short is ready to upload, on upload days, when a week is full, when something fails or needs you, when the plan limit
+pauses work and when it picks up again.
+
+## Picking up where it left off
+If the app closes, crashes or the PC restarts mid-job, it carries on when it starts again: Cutter, Hawk and Pip continue
+from each Short's status, a render that was cut off is queued again (it no longer sticks at "rendering"), and Scripty
+finishes the Short he was writing or starts the cut-off daily run again. Jobs the Claude plan limit cut off are picked
+up by themselves when the limit resets.
+
+## Budget guard
+Settings → Agents → **Budget guard** (default 80%). With more than one team on a Claude account, above that share of the
+plan's current window only the first team on that account starts new jobs so it can finish its Short; the others show
+"Paused" (renders and filing go on). When the limit is reached every team on that account waits and starts again by
+itself at the reset time.
+
 ## Teams
 **Team chip (top left) → Teams** to add up to four teams, rename them, or remove them (back down to one). Each team is a
 full line of four agents working in **its own toolkit repo** (so Short IDs never collide), and **teams work in
@@ -23,6 +80,10 @@ parallel**. Renders take turns on your graphics card and uploads take turns too.
 plan faster. The top bar, review screen and Settings → Toolkit act on the active team (click an agent or a team's
 review screen to switch). The daily run starts a Short for every team. Removing a team stops its desks; its toolkit
 clone and chats stay on the PC. The main team keeps the original settings, chats and folders.
+
+**A Claude account per team:** Settings → Account → **More Claude accounts** → Add account → **Sign in** (a terminal opens:
+type `/login` with that account). Then pick it in Teams → the team's **Claude account** list. Each account is its own
+Claude Code login folder on this PC, so every team can have its own plan limit; the top bar shows the active team's usage.
 
 **The pipeline (autopilot, no questions):** Scripty writes + voices a Short → status `voiced` → Cutter builds
 the cast, sets, story, sound and captions, runs the still checks → `ready_to_render` → the app renders it on
@@ -35,19 +96,19 @@ Cutter with the error (up to 2 fixes per Short).
 **Publishing (Pip):** an `approved` Short goes to Pip, who writes `shorts/<ID>/publish.json` + `publish.md` (title,
 3 alternatives, description with the verified facts, a question and hashtags, tags) → `ready_to_publish`. Then, by
 **Settings → Publishing → Publish via** (switch any time):
-- **YouTube direct** (default, free): uploads from this PC as private with an exact go-live time → `uploaded_scheduled`;
+- **I post them myself** (default): see *Weekly uploads* above.
+- **YouTube direct** (free): uploads from this PC as private with an exact go-live time → `uploaded_scheduled`;
   YouTube makes it public then, even with the PC off. After that time the app checks the video really went public →
   `published`, or `publish_failed` if YouTube kept it private (some unverified Google Cloud projects are held private).
   Setup: Google Cloud OAuth client (Desktop app, YouTube Data API v3) → choose client_secret.json → Sign in.
 - **Buffer**: puts the video on your video host (Cloudinary or Cloudflare R2 — Buffer only takes public links), then
   creates a YouTube Short post in Buffer → `queued_buffer` → `published`. Setup: Buffer API key, YouTube channel in
   Buffer, video host keys.
-- **I post them myself**: nothing is posted automatically; Pip's details are on the review screen to copy.
 
-One Short per day either way: each goes on the next free day at that weekday's best time in your audience's time zone
+One Short per day either way, and only on your upload days: each goes on the next free day at that weekday's best time in your audience's time zone
 (default US Eastern: Mon 6 PM, Tue 7 PM, Wed 6 PM, Thu 7 PM, Fri 4 PM, Sat 6 PM, Sun 5 PM — Buffer's and SocialPilot's
 2026 studies). **Posted one yourself** (now or before the app existed)? Open it on the review screen and press
-**I posted it myself** with the date: it becomes `published_manual`, is never posted again, and its day counts in the
+**Mark as posted** with the date: it becomes `published_manual`, is never posted again, and its day counts in the
 schedule. "Not posted after all" undoes it.
 
 **Review screen:** click the TV on the back wall (or 🎬 Review in the top bar) to watch any render, read
@@ -154,8 +215,10 @@ Everything Scripty may, plus the toolkit's own builders and scripts: `python too
 toolkit still ask (or are skipped in autopilot).
 
 ## Where things are saved
-`%APPDATA%\Oopsmith Studio\` — settings, encrypted Gemini key, chat history per desk, and the Claude
-session id (so Scripty remembers the conversation after a restart; **New chat** starts fresh).
+`%APPDATA%\Oopsmith Studio\` — settings, encrypted Gemini key, chat history per desk, the Claude
+session id (so Scripty remembers the conversation after a restart; **New chat** starts fresh), the weekly plan
+(`plan.json`), jobs to pick up after a restart (`jobs.json`), the last plan usage per account (`guard.json`) and the
+extra Claude accounts' login folders (`claude-accounts\`).
 
 ## Build an installer (optional)
 ```powershell
@@ -185,7 +248,8 @@ resources/       bundled copy of viral-short-script.md (the toolkit's copy wins 
 - Compare before/after on the review screen's token table: it shows tokens per desk for every Short.
 
 ## Current limits
-- Models default to Sonnet for every desk (Settings to change). Each job has a step cap so a stuck agent can't burn your plan.
-- One Short moves through the pipeline at a time. Building a Short uses a lot of Claude usage (many steps and still checks); on Pro, expect roughly one Short a day.
+- Each job has a step cap so a stuck agent can't burn your plan.
+- Within a team, one Short is built at a time; teams work in parallel. Building a Short uses a lot of Claude usage (many
+  steps and still checks); on Pro, expect roughly one Short a day per account.
 - Plan usage appears in the top bar after the first message (it's reported with each reply).
-- Profiles / second-account switching is Phase 5; for now "Sign in / switch…" changes the one login.
+- The daily run and posting reminders need the app open (or opened later that day) and the PC awake.

@@ -18,20 +18,20 @@ function defaults(): Stored {
   return {
     toolkitRepo: 'clarkekoko11/roblox-shorts-toolkit',
     toolkitPath: existsSync(existing) ? existing : join(homedir(), 'OopsmithStudio', 'roblox-shorts-toolkit'),
-    scriptWriterModel: 'sonnet',
-    editorModel: 'sonnet',
-    reviewerModel: 'sonnet',
+    scriptWriterModel: 'opus',
+    editorModel: 'opus',
+    reviewerModel: 'opus',
     pythonCommand: process.platform === 'win32' ? 'python' : 'python3',
     cameraMode: 'topdown',
     autopilot: true,
     dailyTime: '09:00',
     lastDailyRun: '',
     renderReady: false,
-    publisherModel: 'sonnet',
+    publisherModel: 'opus',
     youtubeAutoUpload: true,
     youtubeMode: 'scheduled',
     youtubeHour: 18,
-    publishVia: 'youtube',
+    publishVia: 'manual',
     bufferChannelId: '',
     bufferChannelName: '',
     youtubeCategory: '24',
@@ -47,19 +47,56 @@ function defaults(): Stored {
     effort: { 'script-writer': 'high', editor: 'high', reviewer: 'medium', publisher: 'low' },
     mainTeamName: 'Team Oopsmith',
     teams: [],
+    settingsVersion: SETTINGS_VERSION,
+    postingDays: ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'],
+    weekOneStart: '',
+    renderDir: '',
+    weeksDir: '',
+    budgetGuard: 0.8,
+    notifyDesktop: true,
+    ntfyTopic: '',
+    remindMinutes: 120,
+    backlogAuto: true,
+    profiles: [],
+    mainProfile: '',
+    dayNight: true,
+    milestoneSeen: 0,
   };
 }
 
+const SETTINGS_VERSION = 2;
+
+/** One-time changes for settings saved by older versions. */
+function migrate(s: Stored, from: number): Stored {
+  if (from < 2) {
+    // Opus on every desk (effort per desk keeps the tokens down), and you upload the Shorts yourself for now:
+    // approved Shorts are sorted into weekly folders instead of being posted.
+    for (const k of ['scriptWriterModel', 'editorModel', 'reviewerModel', 'publisherModel'] as const) if (s[k] === 'sonnet') s[k] = 'opus';
+    s.publishVia = 'manual';
+  }
+  s.settingsVersion = SETTINGS_VERSION;
+  return s;
+}
+
+let migrated = false;
 export function loadSettings(): Settings {
   let s: Stored = defaults();
+  let stored: Partial<Stored> | null = null;
   try {
-    const stored = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<Stored>;
+    stored = JSON.parse(readFileSync(settingsFile(), 'utf8')) as Partial<Stored>;
     for (const [k, v] of Object.entries(stored)) {
       // blank values (e.g. saved by an older version) fall back to the defaults
       if (typeof v === 'string' && !v.trim() && ['toolkitPath', 'toolkitRepo', 'pythonCommand', 'scriptWriterModel', 'editorModel', 'reviewerModel', 'publisherModel'].includes(k)) continue;
       (s as unknown as Record<string, unknown>)[k] = v;
     }
   } catch { /* first run */ }
+  if (stored && (stored.settingsVersion ?? 1) < SETTINGS_VERSION && !migrated) {
+    migrated = true;
+    s = migrate(s, stored.settingsVersion ?? 1);
+    mkdirSync(dir(), { recursive: true });
+    writeFileSync(settingsFile(), JSON.stringify(s, null, 2));
+  }
+  if (!Array.isArray(s.postingDays) || !s.postingDays.length) s.postingDays = defaults().postingDays;
   return { ...s, hasGeminiKey: existsSync(keyFile()) };
 }
 

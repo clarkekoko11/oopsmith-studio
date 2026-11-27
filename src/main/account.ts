@@ -1,9 +1,11 @@
 // Checks which Claude account the agents will use, without sending a prompt (costs no usage).
 import { homedir } from 'node:os';
 import type { AccountState } from '../shared/types';
+import { profileEnv } from './profiles';
 import { agentEnv, apiKeyInEnv, claudeExecutable, idleInput, loadSdk } from './sdk';
 
-export async function checkAccount(): Promise<AccountState> {
+/** profile '' = this PC's default Claude Code login; otherwise one of the extra accounts. */
+export async function checkAccount(profile = ''): Promise<AccountState> {
   const base: AccountState = { checked: true, signedIn: false, apiKeyInEnv: apiKeyInEnv() };
   try {
     const { query } = await loadSdk();
@@ -12,7 +14,7 @@ export async function checkAccount(): Promise<AccountState> {
       prompt: input.stream,
       options: {
         cwd: homedir(),
-        env: agentEnv(),
+        env: agentEnv(profileEnv(profile)),
         pathToClaudeCodeExecutable: claudeExecutable(),
         settingSources: [],
         persistSession: false,

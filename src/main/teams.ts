@@ -9,7 +9,7 @@ export const MAX_TEAMS = 4;
 
 export function listTeams(s: Settings = loadSettings()): TeamConfig[] {
   return [
-    { id: MAIN_TEAM, name: s.mainTeamName || 'Team Oopsmith', toolkitRepo: s.toolkitRepo, toolkitPath: s.toolkitPath },
+    { id: MAIN_TEAM, name: s.mainTeamName || 'Team Oopsmith', toolkitRepo: s.toolkitRepo, toolkitPath: s.toolkitPath, profile: s.mainProfile ?? '' },
     ...(s.teams ?? []),
   ];
 }

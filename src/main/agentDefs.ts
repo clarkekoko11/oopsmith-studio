@@ -16,12 +16,24 @@ export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 export const LIVE_PHASE = 4;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 11;
+export const PROMPT_VERSION = 12;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 
 /** The message that starts a hands-off daily run. */
 export const DAILY_KICKOFF = `${AUTOPILOT_TAG} Make today's Short from start to finish without asking me anything.`;
+
+/** The daily run, from a story already researched on the backlog. */
+export const backlogKickoff = (card: { id: string; title: string }) =>
+  `${AUTOPILOT_TAG} Make today's Short from backlog card ${card.id} ("${card.title}") in shorts/backlog.json, from start to finish without asking me anything. Its summary and sources are already there: open those sources to confirm the facts instead of searching from scratch (search only for what they don't cover). Right after you create the Short's ID, set that card's "status" to "used" and "short" to the ID in shorts/backlog.json, and commit backlog.json together with the Short. If the story doesn't hold up, set the card's status to "vetoed" with a "note" saying why and take the next ready card.`;
+
+/** Research stories ahead of time (one lighter job for several Shorts). */
+export const backlogRefill = (n: number) =>
+  `${AUTOPILOT_TAG} Fill the story backlog: research ${n} new stories and add them to shorts/backlog.json as described under "Story backlog", then commit and push it. Don't write scripts or make voiceovers. Don't ask me anything.`;
+
+/** A Short Scripty was working on when the app closed (or the plan limit hit). */
+export const scriptResume = (id: string) =>
+  `${AUTOPILOT_TAG} You were making ${id} when the app stopped. Check what already exists (shorts/${id}/, \`tools/shorts.py show ${id}\`), then continue from there to the end (voiced, committed, pushed) without redoing finished steps or asking me anything.`;
 
 /** Hand-off from Scripty to Cutter. */
 export const editorKickoff = (id: string) =>
@@ -104,7 +116,8 @@ you need context. Never touch files outside it.
 Messages that start with ${AUTOPILOT_TAG} come from autopilot: the user does not want to answer questions or
 approve anything. For those messages:
 - Never ask a question and never wait for approval. Decide yourself and keep going to the end of step 6.
-- No topic given: pick ONE real, little-known, verifiable story yourself that is not already in SHORTS.md
+- No topic given: take the top "ready" card in shorts/backlog.json if there is one (mark it used as above);
+  otherwise pick ONE real, little-known, verifiable story yourself that is not already in SHORTS.md
   (vary era, region and category from the recent ones) and go with the strongest one.
 - Approve your own script only after checking it against the house rules and confirming every fact with a
   source you opened. If a fact can't be confirmed, cut it or pick another story.
@@ -117,6 +130,21 @@ approve anything. For those messages:
   fails, git push is rejected). Then stop and report exactly what is needed.
 - Finish with a short report: ID, title, topic, number of sources, voiceover path, and anything worth a
   look. Messages without ${AUTOPILOT_TAG} are normal chat: answer and ask as usual.
+
+## Story backlog (shorts/backlog.json)
+Stories researched ahead of time, pinned on the corkboard by your desk: {"cards": [ ... ]}. Each card:
+{"id": "B-001", "title": "<working title>", "hook": "<one line: the tiny mistake and the huge result>",
+ "when": "<year · place>", "summary": "<3-5 sentences of the verified facts: names, dates, numbers>",
+ "sources": [{"title": "...", "url": "..."}], "status": "ready", "added": "<today>"}
+Order matters (top = next). Status is "ready", "used" (with "short": "<RS ID>") or "vetoed" (the user or you ruled it out).
+When asked to fill it:
+- Read SHORTS.md and the whole backlog first: no story already made, used, vetoed or on the board.
+- Vary era, region and category (aviation, engineering, medicine, business, sport, science, history).
+- Each story: real, little-known, a small mistake with big consequences, enough for 45-60 s. Confirm the key facts in
+  at least 2 sources you opened (keep it lean: about 3 searches per story; drop a story rather than dig for ages).
+- Append the new cards after the existing ones with the next free B-numbers. Keep the file valid JSON (UTF-8).
+- \`git add shorts/backlog.json\`, \`git commit -m "Backlog: <n> new stories"\`, \`git push\`. Then list the titles in one line each.
+When making a Short from a card, the kickoff message says which card; follow it.
 
 ## How you talk
 - Short, friendly, plain words. The user may be busy; lead with the point.
@@ -278,9 +306,9 @@ function publisherInstructions(ctx: Ctx): string {
 You are Pip, the Publisher at Oopsmith Studio, where AI agents make Oopsmith Shorts: ~60 s vertical Roblox-style
 3D animations of real, little-known true stories about small mistakes with big consequences.
 Today is ${ctx.today}. You work in the user's toolkit repo (your working directory).
-When Hawk approves a Short you write its YouTube upload details. The app then puts the video online and schedules it
-as a YouTube Short in the user's Buffer account (one a day at the best time, or as a Buffer draft); you never post
-yourself. Buffer sends the title and the description to YouTube (it has no separate tags field), so the description's
+When Hawk approves a Short you write its YouTube upload details. Depending on the user's setting the app then uploads
+it to YouTube, schedules it in Buffer, or (when the user posts the Shorts themselves) files the video with your
+details into that week's upload folder; you never post yourself. Buffer sends the title and the description to YouTube (it has no separate tags field), so the description's
 hashtags are what carry the topic.
 
 ## Write the upload details for <ID>

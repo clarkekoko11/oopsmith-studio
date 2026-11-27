@@ -65,6 +65,34 @@ const api: StudioApi = {
   checkUpdate: () => ipcRenderer.invoke('update:check'),
   applyUpdate: () => ipcRenderer.invoke('update:apply'),
   onUpdate: (cb) => on('update', cb),
+
+  getPlan: () => ipcRenderer.invoke('plan:get'),
+  onPlan: (cb) => on('plan', cb),
+  openWeek: (w) => ipcRenderer.invoke('plan:open', w),
+  setPostingDays: (d) => ipcRenderer.invoke('plan:days', d),
+  pickFolder: (k) => ipcRenderer.invoke('folders:pick', k),
+  resetFolder: (k) => ipcRenderer.invoke('folders:reset', k),
+  folders: () => ipcRenderer.invoke('folders:get'),
+
+  getBacklog: (t) => ipcRenderer.invoke('backlog:get', t),
+  saveBacklog: (t, c) => ipcRenderer.invoke('backlog:save', t, c),
+  refillBacklog: (t) => ipcRenderer.invoke('backlog:refill', t),
+  makeFromCard: (t, c) => ipcRenderer.invoke('backlog:make', t, c),
+  onBacklog: (cb) => on('backlog', cb),
+
+  testNotify: () => ipcRenderer.invoke('notify:test'),
+
+  listProfiles: () => ipcRenderer.invoke('profiles:list'),
+  addProfile: (n) => ipcRenderer.invoke('profiles:add', n),
+  removeProfile: (id) => ipcRenderer.invoke('profiles:remove', id),
+  loginProfile: (id) => ipcRenderer.invoke('profiles:login', id),
+  recheckProfile: (id) => ipcRenderer.invoke('profiles:recheck', id),
+  setTeamProfile: (t, p) => ipcRenderer.invoke('teams:profile', t, p),
+  onProfiles: (cb) => on('profiles', cb),
+
+  onGuard: (cb) => on('guard', cb),
+  getGuard: () => ipcRenderer.invoke('guard:get'),
+  onCelebrate: (cb) => on('celebrate', cb),
 };
 
 contextBridge.exposeInMainWorld('studio', api);
