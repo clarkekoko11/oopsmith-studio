@@ -3,13 +3,13 @@ import { app } from 'electron';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import type { SDKUserMessage, SDKMessage, Query } from '@anthropic-ai/claude-agent-sdk';
-import { MAIN_TEAM, type AgentEvent, type AgentId, type AgentInfo, type AgentStatus, type ChatItem, type TeamId, type UsageState } from '../shared/types';
+import { crewNames, MAIN_TEAM, renameCrew, type AgentEvent, type AgentId, type AgentInfo, type AgentStatus, type ChatItem, type TeamId, type UsageState } from '../shared/types';
 import { AGENTS, AUTOPILOT_TAG, agentMeta, instructions, LIVE_PHASE, PROMPT_VERSION } from './agentDefs';
 import { decide, describeTool, inside } from './permissions';
 import { profileEnv, teamProfile } from './profiles';
 import { agentEnv, claudeExecutable, loadSdk } from './sdk';
 import { getGeminiKey } from './settings';
-import { settingsFor } from './teams';
+import { crewOf, settingsFor } from './teams';
 import { describe, recordTurn } from './usage';
 
 type Emit = (e: AgentEvent) => void;
@@ -152,8 +152,10 @@ class AgentSession {
     this.activity = activity;
     this.emit({ team: this.team, agent: this.id, type: 'status', status, activity });
   }
+  /** this team's crew names in place of the original crew's */
+  rn(text: string) { return renameCrew(text, crewOf(this.team)); }
   notice(text: string, tone: 'info' | 'warn' | 'error' = 'info') {
-    this.put({ kind: 'notice', id: uid(), text, tone, at: Date.now() });
+    this.put({ kind: 'notice', id: uid(), text: this.rn(text), tone, at: Date.now() });
   }
 
   /**
@@ -163,6 +165,8 @@ class AgentSession {
    */
   async send(text: string, display?: string, opts: { fresh?: boolean; short?: string; effort?: string } = {}): Promise<boolean> {
     const settings = this.settings();
+    text = this.rn(text);
+    if (display) display = this.rn(display);
     if (!settings.toolkitPath || !existsSync(settings.toolkitPath)) {
       this.notice("The toolkit isn't on this PC yet. Open Settings → Toolkit → Clone / update.", 'warn');
       return false;
@@ -195,15 +199,15 @@ class AgentSession {
     this.inbox = new Inbox();
     const resourcesDir = join(app.getAppPath(), 'resources');
     if (this.hasOutdatedSession) {
-      this.notice(`${agentMeta(this.id).name} has new instructions, so this is a fresh conversation (older messages stay above).`);
+      this.notice(`${crewNames(crewOf(this.team))[this.id]} has new instructions, so this is a fresh conversation (older messages stay above).`);
       this.sessionId = undefined;
     }
-    const append = instructions(this.id, {
+    const append = this.rn(instructions(this.id, {
       toolkit: root,
       python: settings.pythonCommand,
       resourcesDir,
       today: new Date().toISOString().slice(0, 10),
-    });
+    }));
     this.q = query({
       prompt: this.inbox,
       options: {
@@ -419,7 +423,9 @@ export class AgentManager {
     for (const a of AGENTS) if (a.phase <= LIVE_PHASE) this.sessions.set(a.id, new AgentSession(team, a.id, emit, usage));
   }
   list(): AgentInfo[] {
-    return AGENTS.map((a) => {
+    const names = crewNames(crewOf(this.team));
+    return AGENTS.map((base) => {
+      const a = { ...base, name: names[base.id] };
       const s = this.sessions.get(a.id);
       if (s?.external && s.status === 'idle') return { ...a, status: 'working' as const, activity: s.external };
       return { ...a, status: s ? s.status : 'offline', activity: s ? s.activity : `arrives in Phase ${a.phase}` };
@@ -452,7 +458,10 @@ export class AgentManager {
   onUsage(cb: (short: string | undefined) => void) { for (const s of this.sessions.values()) s.onUsage = cb; }
   /** Post something from the app itself into a desk's chat. */
   post(id: AgentId, item: NewItem) {
-    this.sessions.get(id)?.put({ id: uid(), at: Date.now(), ...item } as ChatItem);
+    const s = this.sessions.get(id);
+    if (!s) return;
+    const it = 'text' in item && typeof item.text === 'string' && (item.kind === 'notice' || item.kind === 'agent') ? { ...item, text: s.rn(item.text) } : item;
+    s.put({ id: uid(), at: Date.now(), ...it } as ChatItem);
   }
   setCurrentShort(id: AgentId, short: string) { const s = this.sessions.get(id); if (s) s.currentShort = short; }
   /** Mark a desk busy with app work (rendering); undefined clears it. */

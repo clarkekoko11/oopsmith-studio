@@ -16,7 +16,7 @@ export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 export const LIVE_PHASE = 4;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 13;
+export const PROMPT_VERSION = 14;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 

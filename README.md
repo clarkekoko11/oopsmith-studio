@@ -89,6 +89,10 @@ plan faster. The top bar, review screen and Settings → Toolkit act on the acti
 review screen to switch). The daily run starts a Short for every team, and so does **Make today's Shorts** (Settings → Autopilot: switch it to only the team you're looking at). Removing a team stops its desks; its toolkit
 clone and chats stay on the PC. The main team keeps the original settings, chats and folders.
 
+**Every team has its own crew:** its own names and outfits (shirts keep the desk colours so the roles still read):
+Team 1 Scripty, Cutter, Hawk, Pip · Team 2 Quill, Splice, Lynx, Dash · Team 3 Inky, Reel, Owl, Bolt ·
+Team 4 Penny, Frame, Falcon, Zip. Their chats, status lines, notifications and instructions use those names.
+
 **A Claude account per team:** Settings → Account → **More Claude accounts** → Add account → **Sign in** (a terminal opens:
 type `/login` with that account). Then pick it in Teams → the team's **Claude account** list. Each account is its own
 Claude Code login folder on this PC, so every team can have its own plan limit; the top bar shows the active team's usage.

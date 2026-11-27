@@ -6,7 +6,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { copyFile, rename, unlink } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type CelebrateEvent, type GuardState, type ProfileState, type Settings, type ShortRow, type TeamId, type UsageState } from '../shared/types';
+import { crewNames, MAIN_TEAM, renameCrew, type AccountState, type AgentEvent, type AgentId, type CelebrateEvent, type GuardState, type ProfileState, type Settings, type ShortRow, type TeamId, type UsageState } from '../shared/types';
 import { checkAccount } from './account';
 import { backlogKickoff, backlogRefill, dailyKickoff } from './agentDefs';
 import { IN_PRODUCTION, Pipeline, TAKES_A_DAY, type PipelineEvent } from './pipeline';
@@ -29,7 +29,7 @@ import { claudeExecutable } from './sdk';
 import { AgentManager } from './agents';
 import { inside } from './permissions';
 import { loadSettings, saveSettings, setGeminiKey, testGeminiKey } from './settings';
-import { addTeam, listTeams, removeTeam, renameTeam, setTeamPath, setTeamRepo, settingsFor, teamsOnToolkit, uniqueToolkits } from './teams';
+import { addTeam, crewOf, listTeams, removeTeam, renameTeam, setTeamPath, setTeamRepo, settingsFor, teamsOnToolkit, uniqueToolkits } from './teams';
 
 const here = dirname(fileURLToPath(import.meta.url));
 let win: BrowserWindow | undefined;
@@ -95,10 +95,11 @@ const helper = (f: string) => join(app.getAppPath(), 'resources', f).replace(`ap
 interface Crew { agents: AgentManager; pipeline: Pipeline }
 const crews = new Map<TeamId, Crew>();
 
-const NAMES: Record<AgentId, string> = { 'script-writer': 'Scripty', editor: 'Cutter', reviewer: 'Hawk', publisher: 'Pip' };
 const tname = (team: TeamId) => listTeams().find((t) => t.id === team)?.name ?? team;
 const multi = () => listTeams().length > 1;
-const who = (team: TeamId, agent: AgentId) => `${NAMES[agent]}${multi() ? ` (${tname(team)})` : ''}`;
+const who = (team: TeamId, agent: AgentId) => `${crewNames(crewOf(team))[agent]}${multi() ? ` (${tname(team)})` : ''}`;
+/** a message written with the original crew's names, in this team's crew names */
+const rn = (team: TeamId, text: string) => renameCrew(text, crewOf(team));
 
 function makeCrew(team: TeamId): Crew {
   const agents = new AgentManager(
@@ -120,7 +121,8 @@ function makeCrew(team: TeamId): Crew {
   pipeline.owner = (m) => ownerOf(team, m);
   pipeline.firstOnToolkit = () => teamsOnToolkit(settingsFor(team).toolkitPath)[0]?.id === team;
   pipeline.busyElsewhere = (id) => [...crews.entries()].some(([t, c]) => t !== team && sameToolkit(t, team) && (['script-writer', 'editor', 'reviewer', 'publisher'] as AgentId[]).some((a) => c.agents.currentWork(a) === id));
-  pipeline.onBlocked = (message) => {
+  pipeline.onBlocked = (raw) => {
+    const message = rn(team, raw);
     send('pipeline:blocked', { team, message });
     agents.post('editor', { kind: 'notice', tone: 'warn', text: message });
     if (message) void notify(`${tname(team)} is waiting`, message, 'info');
@@ -728,15 +730,15 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('backlog:refill', async (_e, team: TeamId) => {
     const c = crew(team);
-    if (!c.agents.isIdle('script-writer')) return { ok: false, message: 'Scripty is busy. Try again when he is free.' };
+    if (!c.agents.isIdle('script-writer')) return { ok: false, message: rn(team, 'Scripty is busy. Try again when he is free.') };
     const left = readyCards(settingsFor(team).toolkitPath).length;
     const n = Math.max(3, 5 - left);
     await c.agents.send('script-writer', backlogRefill(n), `Research ${n} stories for the backlog`, { fresh: true, effort: 'medium' });
-    return { ok: true, message: `Scripty is researching ${n} stories. They show up on the corkboard as he adds them.` };
+    return { ok: true, message: rn(team, `Scripty is researching ${n} stories. They show up on the corkboard as he adds them.`) };
   });
   ipcMain.handle('backlog:make', async (_e, team: TeamId, card: string) => {
     const r = await runDaily(team, 'manual', card);
-    return r === 'started' ? { ok: true, message: 'Scripty is making a Short from this story now.' } : { ok: false, message: r === 'busy' ? 'Scripty is busy. Try again when he is free.' : r };
+    return r === 'started' ? { ok: true, message: rn(team, 'Scripty is making a Short from this story now.') } : { ok: false, message: r === 'busy' ? rn(team, 'Scripty is busy. Try again when he is free.') : r };
   });
 
   // ---- notifications, guard
@@ -855,7 +857,7 @@ async function runDaily(team: TeamId, reason: 'manual' | 'schedule', cardId?: st
   // teams sharing the toolkit take turns choosing a story: wait while another team's Scripty is still picking his
   // (working, but no Short ID yet), so two of them never pick the same one
   const picking = listTeams().find((t) => t.id !== team && sameToolkit(t.id, team) && !crew(t.id).agents.isIdle('script-writer') && !crew(t.id).agents.currentWork('script-writer'));
-  if (picking && !cardId) return reason === 'schedule' || opts.waitTurn ? 'busy' : `${picking.name}'s Scripty is choosing a story right now (you share a toolkit). Try again in a minute.`;
+  if (picking && !cardId) return reason === 'schedule' || opts.waitTurn ? 'busy' : `${picking.name}'s ${crewNames(crewOf(picking.id))['script-writer']} is choosing a story right now (you share a toolkit). Try again in a minute.`;
   const paused = pausedReason(team, listTeams());
   if (paused && reason === 'schedule') return `Waiting: ${paused}`;
   const s = loadSettings();

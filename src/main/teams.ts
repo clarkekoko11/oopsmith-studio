@@ -10,11 +10,21 @@ import { loadSettings, saveSettings } from './settings';
 export const MAX_TEAMS = 4;
 
 export function listTeams(s: Settings = loadSettings()): TeamConfig[] {
+  // every extra team gets its own crew (names + outfits); teams from before crews existed get the next free one
+  const used = new Set<number>([0]);
+  const extra = (s.teams ?? []).map((t) => {
+    let crew = t.crew && t.crew > 0 && !used.has(t.crew) ? t.crew : 0;
+    if (!crew) { crew = 1; while (used.has(crew)) crew++; }
+    used.add(crew);
+    return { ...t, crew };
+  });
   return [
-    { id: MAIN_TEAM, name: s.mainTeamName || 'Team Oopsmith', toolkitRepo: s.toolkitRepo, toolkitPath: s.toolkitPath, profile: s.mainProfile ?? '' },
-    ...(s.teams ?? []),
+    { id: MAIN_TEAM, name: s.mainTeamName || 'Team Oopsmith', toolkitRepo: s.toolkitRepo, toolkitPath: s.toolkitPath, profile: s.mainProfile ?? '', crew: 0 },
+    ...extra,
   ];
 }
+/** The crew (names + outfits) of a team. */
+export const crewOf = (team: TeamId) => getTeam(team)?.crew ?? 0;
 
 export function getTeam(id: TeamId): TeamConfig | undefined {
   return listTeams().find((t) => t.id === id);
@@ -55,7 +65,10 @@ export function addTeam(name: string, repo: string): { ok: boolean; message: str
   while (id === MAIN_TEAM || teams.some((t) => t.id === id)) id = `${id}-${Math.floor(Math.random() * 90 + 10)}`;
   // a repo another team already uses: work in that same folder
   const same = listTeams(s).find((t) => t.toolkitRepo.toLowerCase() === r.toLowerCase());
-  const team: TeamConfig = { id, name: n, toolkitRepo: same?.toolkitRepo ?? r, toolkitPath: same?.toolkitPath ?? join(homedir(), 'OopsmithStudio', 'teams', id, r.split('/').pop() || 'toolkit') };
+  const usedCrews = new Set(listTeams(s).map((t) => t.crew ?? 0));
+  let crew = 1;
+  while (usedCrews.has(crew)) crew++;
+  const team: TeamConfig = { id, name: n, crew, toolkitRepo: same?.toolkitRepo ?? r, toolkitPath: same?.toolkitPath ?? join(homedir(), 'OopsmithStudio', 'teams', id, r.split('/').pop() || 'toolkit') };
   saveSettings({ teams: [...teams, team] });
   return { ok: true, message: same ? `${n} joined the studio, working in the same toolkit as ${same.name} on its own Shorts.` : `${n} joined the studio.`, team };
 }

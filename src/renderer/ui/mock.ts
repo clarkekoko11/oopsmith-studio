@@ -1,5 +1,5 @@
 // A stand-in for the Electron bridge so the office can be opened in a plain browser for previews/tests.
-import type { AgentEvent, AgentId, AgentInfo, BacklogCard, ChatItem, PlanEntry, PlanState, Settings, StudioApi, TeamConfig, TeamId } from '../../shared/types';
+import { crewNames, type AgentEvent, type AgentId, type AgentInfo, type BacklogCard, type ChatItem, type PlanEntry, type PlanState, type Settings, type StudioApi, type TeamConfig, type TeamId } from '../../shared/types';
 
 export function mockApi(): StudioApi {
   const listeners: ((e: AgentEvent) => void)[] = [];
@@ -24,10 +24,14 @@ export function mockApi(): StudioApi {
   ];
   // ?teams=2 previews a studio with more teams
   const extra = Number(new URLSearchParams(location.search).get('teams') ?? '1') - 1;
-  for (let i = 0; i < extra; i++) settings.teams.push({ id: `team-${i + 2}`, name: ['Team Two', 'Team Three', 'Team Four'][i], toolkitRepo: `you/toolkit-${i + 2}`, toolkitPath: `C:\\Users\\you\\OopsmithStudio\\teams\\team-${i + 2}` });
+  for (let i = 0; i < extra; i++) settings.teams.push({ id: `team-${i + 2}`, name: ['Team Two', 'Team Three', 'Team Four'][i], crew: i + 1, toolkitRepo: settings.toolkitRepo, toolkitPath: settings.toolkitPath });
   const teamsCbs: ((t: TeamConfig[]) => void)[] = [];
   const teamList = (): TeamConfig[] => [{ id: 'main', name: settings.mainTeamName, toolkitRepo: settings.toolkitRepo, toolkitPath: settings.toolkitPath }, ...settings.teams];
-  const agentsOf = (team: TeamId): AgentInfo[] => team === 'main' ? agents : agents.map((a, i) => ({ ...a, status: i === 0 ? 'working' : 'idle', activity: i === 0 ? 'RS-0001 · writing script' : undefined }));
+  const agentsOf = (team: TeamId): AgentInfo[] => {
+    if (team === 'main') return agents;
+    const names = crewNames(settings.teams.find((t) => t.id === team)?.crew ?? 1);
+    return agents.map((a, i) => ({ ...a, name: names[a.id], status: i === 0 ? 'working' : 'idle', activity: i === 0 ? 'RS-0012 · writing script' : undefined }));
+  };
   const agents: AgentInfo[] = [
     { id: 'script-writer', name: 'Scripty', role: 'Script Writer', phase: 1, status: 'idle' },
     { id: 'editor', name: 'Cutter', role: 'Editor', phase: 2, status: 'working', activity: 'RS-0003 · rendering frames 42%' },

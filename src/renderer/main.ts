@@ -1,5 +1,5 @@
 // Wires the 3D office to the chat drawer, top bar and settings.
-import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type AgentInfo, type BacklogCard, type CelebrateEvent, type ChatItem, type GuardState, type PlanState, type ProfileState, type Settings, type ShortRow, type StudioApi, type TeamConfig, type TeamId, type TokenCount, type UpdateInfo, type UsageState } from '../shared/types';
+import { crewNames, MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type AgentInfo, type BacklogCard, type CelebrateEvent, type ChatItem, type GuardState, type PlanState, type ProfileState, type Settings, type ShortRow, type StudioApi, type TeamConfig, type TeamId, type TokenCount, type UpdateInfo, type UsageState } from '../shared/types';
 import { Office, type CameraMode } from './office/game';
 import { renderMarkdown } from './ui/markdown';
 import { mockApi } from './ui/mock';
@@ -85,7 +85,7 @@ $('#runToday').addEventListener('click', async () => {
   const s = await api.getSettings();
   if (s.runAllTeams && teams.length > 1) return toast("Making today's Shorts", await api.runDailyAll());
   const r = await api.runDaily(active);
-  if (r !== 'started') toast('Not started', r === 'busy' ? 'Scripty is busy right now.' : r);
+  if (r !== 'started') toast('Not started', r === 'busy' ? `${nameOf('script-writer')} is busy right now.` : r);
 });
 $('#runAllTeams').addEventListener('change', async (e) => { await api.saveSettings({ runAllTeams: (e.target as HTMLInputElement).checked }); runAllTeams = (e.target as HTMLInputElement).checked; updateRunButton(); });
 /** With "every team" on, the button works while any team's Scripty is free; otherwise it follows the active team. */
@@ -95,7 +95,7 @@ function updateRunButton() {
   const busy = (t: TeamId) => { const sw = teamAgents(t).find((a) => a.id === 'script-writer'); return !!sw && (sw.status === 'working' || sw.status === 'needs-you'); };
   const all = runAllTeams && teams.length > 1;
   b.disabled = all ? teams.every((t) => busy(t.id)) : busy(active);
-  b.title = all ? `Every team makes a Short (${teams.map((t) => t.name).join(', ')}); teams sharing a toolkit take turns choosing their story` : `Scripty${teams.length > 1 ? ` (${teamName(active)})` : ''} makes today's Short from start to finish`;
+  b.title = all ? `Every team makes a Short (${teams.map((t) => t.name).join(', ')}); teams sharing a toolkit take turns choosing their story` : `${nameOf('script-writer')}${teams.length > 1 ? ` (${teamName(active)})` : ''} makes today's Short from start to finish`;
   b.querySelector('span')!.textContent = all ? "Make today's Shorts" : "Make today's Short";
 }
 void api.getSettings().then((s) => { runAllTeams = s.runAllTeams; updateRunButton(); });
@@ -192,7 +192,7 @@ function renderMessages() {
   if (!items.length && a && a.status !== 'offline') {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.innerHTML = `<b>${a.name}</b> ${BLURB[a.id] ?? ''}<div class="starters"></div>`;
+    empty.innerHTML = `<b>${a.name}</b> ${(BLURB[a.id] ?? '').replace('Cutter', nameOf('editor', open!.team))}<div class="starters"></div>`;
     for (const s of STARTERS[a.id] ?? []) {
       const b = document.createElement('button');
       b.textContent = s;
@@ -707,12 +707,13 @@ const postedBy = new Map<TeamId, number>();
 // ---------------- review screen
 let reviewing: string | null = null;
 const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
-const NAMES: Record<string, string> = { 'script-writer': 'Scripty', editor: 'Cutter', reviewer: 'Hawk', publisher: 'Pip' };
+/** this team's crew names (each team has its own) */
+const nameOf = (agent: string, team: TeamId = active) => teamAgents(team).find((a) => a.id === agent)?.name ?? crewNames(teams.find((t) => t.id === team)?.crew)[agent as AgentId];
 function usageTable(byAgent: Partial<Record<string, TokenCount>>, total: TokenCount): string {
   const row = (name: string, t: TokenCount) =>
     `<tr><td>${name}</td><td>${fmt(t.input + t.output + t.cacheRead + t.cacheWrite)}</td><td>${fmt(t.output)}</td><td>${fmt(t.cacheRead)}</td><td>${t.steps}</td></tr>`;
   return `<table class="usage-table"><tr><th>Desk</th><th>Total</th><th>Written</th><th>From cache</th><th>Steps</th></tr>${Object.entries(byAgent)
-    .map(([k, t]) => row(NAMES[k] ?? k, t!))
+    .map(([k, t]) => row(nameOf(k) ?? k, t!))
     .join('')}${row('All desks', total)}</table>`;
 }
 /** status -> friendly label + colour group */
@@ -803,7 +804,7 @@ async function showReview(id: string) {
   const d = info.publishAt ? new Date(info.publishAt) : new Date();
   pa.value = new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   // drop the review's own "# RS-0003 v1 review — APPROVED" heading: the header above already says it
-  $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review.replace(/^#\s+[^\n]*\n+/, '')) : '<p class="muted">Hawk hasn\'t reviewed this one yet.</p>';
+  $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review.replace(/^#\s+[^\n]*\n+/, '')) : `<p class="muted">${nameOf('reviewer')} hasn't reviewed this one yet.</p>`;
   $('#publishText').innerHTML = info.publish ? renderMarkdown(info.publish.replace(/^#\s+[^\n]*\n+/, '')) : '';
   $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted">No token data for this Short yet.</p>';
   $('#reviewMsg').textContent = '';
@@ -924,7 +925,7 @@ function setActive(team: TeamId) {
 }
 async function applyTeams(list: TeamConfig[]) {
   teams = list;
-  office.setTeams(teams.map((t) => ({ id: t.id, name: t.name })));
+  office.setTeams(teams.map((t) => ({ id: t.id, name: t.name, crew: t.crew })));
   for (const t of teams) {
     const a = await api.getAgents(t.id);
     agentsBy.set(t.id, a);
@@ -1234,7 +1235,7 @@ function renderCards(list: BacklogCard[]) {
     (el.querySelector('.make') as HTMLButtonElement).onclick = async () => {
       const r = await api.makeFromCard(active, c.id);
       $('#backlogMsg').textContent = r.message;
-      if (r.ok) toast('Scripty is on it', c.title);
+      if (r.ok) toast(`${nameOf('script-writer')} is on it`, c.title);
     };
     box.appendChild(el);
   });

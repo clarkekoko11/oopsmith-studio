@@ -15,6 +15,24 @@ export interface TeamConfig {
   toolkitPath: string;
   /** Claude account this team runs on ('' = this PC's default Claude Code login; main team: Settings.mainProfile) */
   profile?: string;
+  /** which crew works on this line (its own names and outfits): 0 = the original crew, 1-3 the others */
+  crew?: number;
+}
+
+/** Each team's crew has its own names (and its own outfits in the office), so teams are easy to tell apart. */
+export const CREWS: Record<AgentId, string>[] = [
+  { 'script-writer': 'Scripty', editor: 'Cutter', reviewer: 'Hawk', publisher: 'Pip' },
+  { 'script-writer': 'Quill', editor: 'Splice', reviewer: 'Lynx', publisher: 'Dash' },
+  { 'script-writer': 'Inky', editor: 'Reel', reviewer: 'Owl', publisher: 'Bolt' },
+  { 'script-writer': 'Penny', editor: 'Frame', reviewer: 'Falcon', publisher: 'Zip' },
+];
+export const crewNames = (crew = 0): Record<AgentId, string> => CREWS[crew % CREWS.length];
+/** Swap the original crew's names in a text for this crew's (instructions, notices, status lines). */
+export function renameCrew(text: string, crew = 0): string {
+  if (!crew) return text;
+  const to = crewNames(crew);
+  const from: Record<string, AgentId> = { Scripty: 'script-writer', Cutter: 'editor', Hawk: 'reviewer', Pip: 'publisher' };
+  return text.replace(/\b(Scripty|Cutter|Hawk|Pip)\b/g, (m) => to[from[m]]);
 }
 
 /** An extra Claude account (its own Claude Code login folder on this PC). */

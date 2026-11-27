@@ -15,7 +15,8 @@ import { dayKey, describeSlot, nextSlot } from './schedule';
 import type { AgentManager } from './agents';
 import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
-import { settingsFor } from './teams';
+import { crewOf, settingsFor } from './teams';
+import { renameCrew } from '../shared/types';
 
 type Reg = { shorts: Record<string, { id: string; team?: string; status?: string; error?: string; title?: string; topic?: string; created?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
 
@@ -111,8 +112,11 @@ export class Pipeline {
     for (const k of [...this.tries.keys()]) if (k.includes(id)) this.tries.delete(k);
   }
 
-  /** One line: what this Short is waiting for right now. */
+  /** One line: what this Short is waiting for right now (in this team's crew names). */
   explain(id: string): string {
+    return renameCrew(this.explainRaw(id), crewOf(this.team));
+  }
+  private explainRaw(id: string): string {
     const reg = this.registry();
     const m = reg?.shorts[id];
     if (!m) return '';

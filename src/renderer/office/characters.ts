@@ -13,8 +13,10 @@ export interface Look {
   pants: string;
   shoes?: string;
   hair?: string;
-  hairStyle?: 'short' | 'bob' | 'spiky' | 'none';
-  hat?: 'beret' | 'cap' | 'headphones' | 'none';
+  hairStyle?: 'short' | 'bob' | 'spiky' | 'long' | 'bun' | 'afro' | 'none';
+  hat?: 'beret' | 'cap' | 'headphones' | 'beanie' | 'bucket' | 'visor' | 'bandana' | 'none';
+  /** long sleeves in the shirt colour (or this colour, like a jacket) */
+  sleeves?: string;
   hatColor?: string;
   glasses?: boolean;
   shirtStripe?: string;
@@ -140,10 +142,11 @@ export function makeCharacter(look: Look): Character {
   };
   const armL = limb(-1.5, 4, skin);
   const armR = limb(1.5, 4, skin);
-  // short sleeves
+  // short sleeves, or long ones (a jacket) when the look has them
   for (const a of [armL, armR]) {
-    const sleeve = box(1.06, 0.84, 1.06, shirt);
-    sleeve.position.y = -0.4;
+    const long = !!look.sleeves;
+    const sleeve = box(1.06, long ? 1.7 : 0.84, 1.06, long ? mat(look.sleeves!) : shirt);
+    sleeve.position.y = long ? -0.85 : -0.4;
     a.add(sleeve);
   }
   const legL = limb(-0.5, 2, pants, shoes);
@@ -172,13 +175,21 @@ export function makeCharacter(look: Look): Character {
   const hairStyle = look.hairStyle ?? 'short';
   if (look.hair && hairStyle !== 'none') {
     const hm = mat(look.hair, 0.55);
-    const top = new THREE.Mesh(new THREE.SphereGeometry(0.72, 28, 14, 0, Math.PI * 2, 0, Math.PI * 0.55), hm);
-    top.scale.set(1, hairStyle === 'spiky' ? 0.95 : 0.7, 1);
-    top.position.y = 0.42;
+    const big = hairStyle === 'afro';
+    const top = new THREE.Mesh(new THREE.SphereGeometry(big ? 0.98 : 0.72, 28, 14, 0, Math.PI * 2, 0, Math.PI * (big ? 0.62 : 0.55)), hm);
+    top.scale.set(1, hairStyle === 'spiky' ? 0.95 : big ? 0.85 : 0.7, 1);
+    top.position.y = big ? 0.35 : 0.42;
     top.castShadow = true;
     head.add(top);
-    const back = new THREE.Mesh(new THREE.CylinderGeometry(0.7, 0.68, hairStyle === 'bob' ? 1.15 : 0.75, 28, 1, true, Math.PI * 0.55, Math.PI * 0.9), hm);
-    back.position.y = hairStyle === 'bob' ? 0.05 : 0.25;
+    const backLen = hairStyle === 'long' ? 1.9 : hairStyle === 'bob' ? 1.15 : big ? 0.95 : 0.75;
+    const back = new THREE.Mesh(new THREE.CylinderGeometry(big ? 0.9 : 0.7, big ? 0.85 : hairStyle === 'long' ? 0.74 : 0.68, backLen, 28, 1, true, Math.PI * 0.55, Math.PI * 0.9), hm);
+    back.position.y = hairStyle === 'long' ? -0.35 : hairStyle === 'bob' ? 0.05 : big ? 0.15 : 0.25;
+    if (hairStyle === 'bun') {
+      const bun = new THREE.Mesh(new THREE.SphereGeometry(0.34, 18, 12), hm);
+      bun.position.set(0, 0.95, -0.42);
+      bun.castShadow = true;
+      head.add(bun);
+    }
     back.material = hm.clone();
     (back.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
     head.add(back);
@@ -213,6 +224,43 @@ export function makeCharacter(look: Look): Character {
     brim.scale.set(1, 1, 1.4);
     brim.position.set(0, 0.6, 0.62);
     head.add(brim);
+  } else if (look.hat === 'beanie') {
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(0.72, 28, 12, 0, Math.PI * 2, 0, Math.PI / 2), hc);
+    dome.scale.y = 0.95;
+    dome.position.y = 0.5;
+    dome.castShadow = true;
+    head.add(dome);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.74, 0.74, 0.3, 28), mat(look.hatColor ?? '#333', 0.9));
+    cuff.position.y = 0.5;
+    head.add(cuff);
+    const pom = new THREE.Mesh(new THREE.SphereGeometry(0.17, 12, 8), mat('#fff4e2', 0.95));
+    pom.position.y = 1.25;
+    head.add(pom);
+  } else if (look.hat === 'bucket') {
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.74, 0.55, 28), hc);
+    crown.position.y = 0.82;
+    crown.castShadow = true;
+    head.add(crown);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 1.05, 0.08, 28), hc);
+    brim.position.y = 0.56;
+    head.add(brim);
+  } else if (look.hat === 'visor') {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.66, 0.66, 0.18, 28, 1, true), hc);
+    band.position.y = 0.55;
+    (band.material as THREE.MeshStandardMaterial).side = THREE.DoubleSide;
+    head.add(band);
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.06, 20, 1, false, -Math.PI / 2, Math.PI), hc);
+    brim.scale.set(1, 1, 1.4);
+    brim.position.set(0, 0.5, 0.62);
+    head.add(brim);
+  } else if (look.hat === 'bandana') {
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(0.665, 0.665, 0.26, 28), hc);
+    band.position.y = 0.3;
+    head.add(band);
+    const knot = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.45, 8), hc);
+    knot.position.set(0, 0.15, -0.72);
+    knot.rotation.x = -2.6;
+    head.add(knot);
   } else if (look.hat === 'headphones') {
     const band = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.07, 8, 28, Math.PI), hc);
     band.position.y = 0.25;

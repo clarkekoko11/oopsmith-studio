@@ -8,18 +8,34 @@ import { BRAND, buildOffice, updateMonitor, type ActivitySpot, type DeskSpot, ty
 
 export type CameraMode = 'topdown' | 'firstperson';
 
-// Each team's crew wears the same roles but a different palette, so you can tell lines apart.
-const BASE_LOOKS: Record<AgentId, Look> = {
-  'script-writer': { skin: '#c68c5a', shirt: BRAND.yellow, pants: '#4a3b6b', hair: '#1c1410', hairStyle: 'bob', hat: 'beret', hatColor: '#c0392b', glasses: true },
-  editor: { skin: '#f5d0b0', shirt: BRAND.sky, pants: '#3b4252', hair: '#d9a441', hairStyle: 'short', hat: 'headphones', hatColor: BRAND.plum },
-  reviewer: { skin: '#8d5a3b', shirt: BRAND.orange, pants: '#2b2d3a', hair: '#0f0f12', hairStyle: 'short', glasses: true },
-  publisher: { skin: '#ffd9b8', shirt: BRAND.violet, pants: '#1f4f8a', hairStyle: 'none', hat: 'cap', hatColor: BRAND.orange },
-};
-const TEAM_VARIANTS: Partial<Look>[] = [
-  {},
-  { skin: '#e8b48a', hair: '#7a3b1c', pants: '#2c2a3a' },
-  { skin: '#9a6440', hair: '#2a1a12', pants: '#5a4a2a' },
-  { skin: '#f2c9a0', hair: '#c9a24a', pants: '#3a2a4a' },
+// Each team has its own crew (CREWS in shared/types): own names and own outfits. Shirts keep the desk's colour
+// (yellow scripts, blue edit, orange review, violet publish) so roles still read at a glance; hats, hair, jackets
+// and trousers make every crew distinct.
+const CREW_LOOKS: Record<AgentId, Look>[] = [
+  { // Scripty, Cutter, Hawk, Pip
+    'script-writer': { skin: '#c68c5a', shirt: BRAND.yellow, pants: '#4a3b6b', hair: '#1c1410', hairStyle: 'bob', hat: 'beret', hatColor: '#c0392b', glasses: true },
+    editor: { skin: '#f5d0b0', shirt: BRAND.sky, pants: '#3b4252', hair: '#d9a441', hairStyle: 'short', hat: 'headphones', hatColor: BRAND.plum },
+    reviewer: { skin: '#8d5a3b', shirt: BRAND.orange, pants: '#2b2d3a', hair: '#0f0f12', hairStyle: 'short', glasses: true },
+    publisher: { skin: '#ffd9b8', shirt: BRAND.violet, pants: '#1f4f8a', hairStyle: 'none', hat: 'cap', hatColor: BRAND.orange },
+  },
+  { // Quill, Splice, Lynx, Dash: knits and denim
+    'script-writer': { skin: '#e8b48a', shirt: BRAND.yellow, sleeves: '#b5723a', pants: '#2f4a7a', hair: '#7a3b1c', hairStyle: 'long', glasses: true },
+    editor: { skin: '#f2c9a0', shirt: BRAND.sky, sleeves: '#1d2f55', pants: '#6b6f7a', hair: '#e0b85a', hairStyle: 'short', hat: 'beanie', hatColor: BRAND.orange },
+    reviewer: { skin: '#5c3a26', shirt: BRAND.orange, shirtStripe: BRAND.cream, pants: '#14141a', hair: '#0f0f12', hairStyle: 'bun', hat: 'visor', hatColor: BRAND.plum },
+    publisher: { skin: '#a8714a', shirt: BRAND.violet, pants: '#b59a6a', hair: '#2a1a12', hairStyle: 'afro', hat: 'none' },
+  },
+  { // Inky, Reel, Owl, Bolt: hoodies and street
+    'script-writer': { skin: '#f5d0b0', shirt: BRAND.yellow, sleeves: '#3b2a45', pants: '#23262f', hair: '#111111', hairStyle: 'spiky', hat: 'bandana', hatColor: BRAND.sky },
+    editor: { skin: '#c68c5a', shirt: BRAND.sky, shirtStripe: BRAND.orange, pants: '#3a2a22', hair: '#b3402a', hairStyle: 'bob', hat: 'bucket', hatColor: BRAND.yellow, glasses: true },
+    reviewer: { skin: '#e8b48a', shirt: BRAND.orange, sleeves: BRAND.cream, pants: '#3b4252', hair: '#9a9a9a', hairStyle: 'afro', glasses: true },
+    publisher: { skin: '#8d5a3b', shirt: BRAND.violet, shirtStripe: BRAND.yellow, pants: '#1f1f28', hair: '#e8d08a', hairStyle: 'long', hat: 'headphones', hatColor: BRAND.orange },
+  },
+  { // Penny, Frame, Falcon, Zip: blazers and caps
+    'script-writer': { skin: '#9a6440', shirt: BRAND.yellow, sleeves: '#2b2d3a', pants: '#2b2d3a', hair: '#5a3418', hairStyle: 'bob', glasses: true },
+    editor: { skin: '#ffd9b8', shirt: BRAND.sky, sleeves: '#6b4a2e', pants: '#4a3b2a', hair: '#2a1a12', hairStyle: 'short', hat: 'beanie', hatColor: '#3f8a50' },
+    reviewer: { skin: '#c68c5a', shirt: BRAND.orange, shirtStripe: BRAND.night, pants: '#1f2a44', hair: '#1c1410', hairStyle: 'short', hat: 'cap', hatColor: '#1f2a44' },
+    publisher: { skin: '#f2c9a0', shirt: BRAND.violet, sleeves: BRAND.cream, pants: '#3a2a4a', hair: '#d66a9a', hairStyle: 'bun', hat: 'visor', hatColor: BRAND.orange },
+  },
 ];
 const PLAYER_LOOK: Look = { skin: '#f2c9a0', shirt: BRAND.plum, pants: '#23262f', hair: '#3b2416', hairStyle: 'spiky', shirtStripe: BRAND.orange };
 
@@ -87,6 +103,7 @@ export class Office {
   private confetti: Confetti[] = [];
   private milestones = 0;
   private corks = new Map<TeamId, BacklogCard[]>();
+  private crews = new Map<TeamId, number>();
 
   private player: Character;
   private pos = new THREE.Vector3(0, 0, 11.5);
@@ -158,8 +175,9 @@ export class Office {
 
   // ---------- public API
   /** (Re)build the studio for this list of teams: one production line each, plus the lounge. */
-  setTeams(teams: { id: TeamId; name: string }[]) {
-    const same = this.world && teams.length === this.world.lines.length && teams.every((t, i) => this.world.lines[i].team === t.id && this.world.lines[i].name === t.name);
+  setTeams(teams: { id: TeamId; name: string; crew?: number }[]) {
+    const same = this.world && teams.length === this.world.lines.length && teams.every((t, i) => this.world.lines[i].team === t.id && this.world.lines[i].name === t.name && (this.crews.get(t.id) ?? 0) === (t.crew ?? 0));
+    this.crews = new Map(teams.map((t) => [t.id, t.crew ?? 0]));
     if (same) return;
     const old = new Map(this.agents.map((a) => [a.key, a]));
     if (this.world) this.scene.remove(this.world.root);
@@ -191,7 +209,7 @@ export class Office {
 
     teams.forEach((team, ti) => {
       for (const desk of this.world.desks.filter((x) => x.team === team.id)) {
-        const look = { ...BASE_LOOKS[desk.agent], ...TEAM_VARIANTS[ti % TEAM_VARIANTS.length] };
+        const look = CREW_LOOKS[(team.crew ?? ti) % CREW_LOOKS.length][desk.agent];
         const ch = makeCharacter(look);
         ch.root.traverse((o) => (o.userData.agentKey = desk.key));
         this.scene.add(ch.root);

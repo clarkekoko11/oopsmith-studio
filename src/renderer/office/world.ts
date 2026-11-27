@@ -2,7 +2,7 @@
 // order (Script → Edit → Review → Publish, left to right) with its own board and review screen; everyone shares the
 // lounge at the front (coffee bar, sofa, arcade, books, plants), which is where idle agents hang out.
 import * as THREE from 'three';
-import type { AgentId, BacklogCard, ShortRow, TeamId } from '../../shared/types';
+import { crewNames, type AgentId, type BacklogCard, type ShortRow, type TeamId } from '../../shared/types';
 import type { Action, Prop } from './characters';
 
 export interface Collider { minX: number; maxX: number; minZ: number; maxZ: number }
@@ -205,7 +205,7 @@ export interface World {
   setMilestones(count: number): void;
 }
 
-export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: string }[]): World {
+export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: string; crew?: number }[]): World {
   const root = new THREE.Group();
   scene.add(root);
   const add = (...o: THREE.Object3D[]) => root.add(...o);
@@ -422,7 +422,7 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
       if (!rows.length) {
         g.fillStyle = '#b9a9bd';
         g.font = `500 36px ${TEXT}`;
-        g.fillText('No Shorts yet. Ask Scripty for a story.', 54, 340);
+        g.fillText(`No Shorts yet. Ask ${crewNames(team.crew)['script-writer']} for a story.`, 54, 340);
       }
       rows.slice(0, 8).forEach((r, i) => {
         const y = 310 + i * 84;
@@ -566,7 +566,7 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
           if (!shown.length) {
             c.fillStyle = '#6b5a6e';
             c.font = `500 28px ${TEXT}`;
-            c.fillText('Scripty pins researched stories here.', 60, 300);
+            c.fillText(`${crewNames(team.crew)['script-writer']} pins researched stories here.`, 60, 300);
           }
           shown.forEach((card, i) => {
             const x = 28 + (i % 3) * 246, y = 78 + Math.floor(i / 3) * 246;
