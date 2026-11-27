@@ -199,8 +199,11 @@ export class Pipeline {
         await this.agents.send(writer, scriptResume(unfinished), `Pick up ${unfinished} where it stopped`, { fresh: true, short: unfinished });
       } else if (s.backlogAuto) {
         const left = readyCards(s.toolkitPath).length;
-        const day = new Date().toISOString().slice(0, 10);
-        if (left < BACKLOG_LOW && this.attempt('refill', day, 1)) {
+        const d = new Date();
+        const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+        // backlog research belongs to the day's run: only after today's daily run has started (or with no daily time)
+        const dailyDone = !/^\d{1,2}:\d{2}$/.test(s.dailyTime) || s.lastDailyRun === day;
+        if (dailyDone && left < BACKLOG_LOW && this.attempt('refill', day, 1)) {
           await this.agents.send(writer, backlogRefill(BACKLOG_TARGET - left), `Research ${BACKLOG_TARGET - left} stories for the backlog`, { fresh: true, effort: 'medium' });
         }
       }

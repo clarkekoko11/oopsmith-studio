@@ -195,7 +195,8 @@ picks a new true story that isn't in SHORTS.md, verifies it, writes and self-che
 voiceover, writes every decision into the Short's notes (`shorts.py set <ID> notes=…`), commits and pushes.
 It only stops if something truly needs you (no Gemini key, voiceover API error, push rejected).
 Anything outside the safe list below is skipped instead of asked. Turn Autopilot off to chat and approve
-step by step. The daily run needs the app open (or opened later that day) and the PC awake.
+step by step. The daily run needs the app open (or opened later that day) and the PC awake. Setting a time that has already passed today
+makes the first run tomorrow; backlog research only happens after the day's run has started.
 
 ## What Scripty does
 Ask for pitches or name a story. Scripty checks the facts with web sources, writes the 45–60 s script in

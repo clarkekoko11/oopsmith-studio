@@ -576,6 +576,13 @@ app.whenReady().then(() => {
 
   ipcMain.handle('settings:get', () => loadSettings());
   ipcMain.handle('settings:save', (_e, patch: Partial<Settings>) => {
+    // a new daily time that has already passed today starts tomorrow, not right now
+    // (catching up stays for when the app was closed at the set time)
+    if (typeof patch.dailyTime === 'string' && /^\d{1,2}:\d{2}$/.test(patch.dailyTime)) {
+      const [h, m] = patch.dailyTime.split(':').map(Number);
+      const now = new Date();
+      if (now.getHours() * 60 + now.getMinutes() >= h * 60 + m) patch = { ...patch, lastDailyRun: today() };
+    }
     const r = saveSettings(patch);
     if ('budgetGuard' in patch) sendGuard();
     if ('postingDays' in patch || 'audienceTimezone' in patch) sendPlan();
