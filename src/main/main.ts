@@ -17,7 +17,7 @@ import { addProfile, listProfiles, profileEnv, profileName, removeProfile, setTe
 import { dayKey, daysForQuota, describeSlot } from './schedule';
 import { allEntries, dueReminders, filedVideo, planEntry, planState, plannedDays, renderRoot, weekFolder, weeksRoot } from './weeks';
 import { applyUpdate, checkForUpdate } from './updater';
-import { allUsage, totalTokens } from './usage';
+import { allUsage, madeMs, totalTokens } from './usage';
 import { disableWorkerUpload, listChannels } from './buffer';
 import { getSecret, hasSecret, setSecret } from './secrets';
 import { publishSetupMissing } from './pipeline';
@@ -395,7 +395,7 @@ function shorts(team: TeamId): ShortRow[] {
       .filter((s) => ownerOf(team, s) === team)   // a shared toolkit: each team's board shows its own Shorts
       .map((s) => {
         const u = usage[s.id];
-        return { id: s.id, title: s.title || s.topic || '(untitled)', status: s.status || 'new', version: s.version || 1, tokens: u ? totalTokens(u.total) : undefined, file: s.file };
+        return { id: s.id, title: s.title || s.topic || '(untitled)', status: s.status || 'new', version: s.version || 1, tokens: u ? totalTokens(u.total) : undefined, file: s.file, madeMs: madeMs(u), made: Boolean(u?.doneAt) };
       })
       .sort((a, b) => b.id.localeCompare(a.id));
   } catch {

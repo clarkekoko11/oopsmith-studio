@@ -95,6 +95,8 @@ class AgentSession {
   external?: string;
   /** the plan limit was hit during the current job */
   private hitLimit = false;
+  /** when the current job started (for the time each Short takes) */
+  private jobStart = 0;
   /** thinking effort for the next fresh conversation only (e.g. backlog research runs lighter) */
   private effortOnce?: string;
 
@@ -186,6 +188,7 @@ class AgentSession {
     this.put({ kind: 'user', id: uid(), text: display ?? text.replace(AUTOPILOT_TAG, '').trim(), at: Date.now() });
     this.setStatus('working', 'thinking…');
     this.hitLimit = false;
+    this.jobStart = Date.now();
     journal(this.key, { team: this.team, agent: this.id, text, display, short: this.currentShort, at: Date.now() });
     if (!this.inbox) await this.start();
     this.inbox!.push(tagged);
@@ -352,7 +355,9 @@ class AgentSession {
           this.notice(`That job ended early (${why})${errs?.length ? `: ${errs.join('; ')}` : ''}.`, 'warn');
         }
         if (m.usage) {
-          const turn = recordTurn(this.team, this.currentShort, this.id, m.usage, m.num_turns ?? 0);
+          const ms = this.jobStart ? Date.now() - this.jobStart : (m as { duration_ms?: number }).duration_ms ?? 0;
+          this.jobStart = 0;
+          const turn = recordTurn(this.team, this.currentShort, this.id, m.usage, m.num_turns ?? 0, ms);
           this.notice(`${this.currentShort ?? 'This job'} · ${describe(turn)}`);
           this.onUsage(this.currentShort);
         }

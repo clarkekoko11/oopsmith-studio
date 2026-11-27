@@ -391,3 +391,6 @@ ul.fame li.on em { color: var(--green); }
 #toast.good { border-color: var(--yellow); }
 #toast.good b { color: var(--yellow); }
 @keyframes toastIn { from { opacity: 0; transform: translate(-50%, -10px); } to { opacity: 1; transform: translate(-50%, 0); } }
+
+.rv-made { font-size: 12.5px; color: var(--muted); margin-top: 2px; }
+.rv-made.done { color: var(--green); }

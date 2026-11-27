@@ -439,7 +439,10 @@ export function buildOffice(scene: THREE.Scene, teams: { id: TeamId; name: strin
         g.font = `700 26px ${TEXT}`;
         g.textAlign = 'right';
         const tok = r.tokens ? ` · ${r.tokens >= 1e6 ? (r.tokens / 1e6).toFixed(1) + 'M' : Math.round(r.tokens / 1e3) + 'k'} tok` : '';
-        g.fillText(`${r.status} · v${r.version}${tok}`, 1446, y);
+        // how long it took (finished) or has taken so far
+        const mm = r.madeMs ? Math.round(r.madeMs / 60_000) : 0;
+        const time = r.madeMs ? ` · ${r.made ? '' : '~'}${mm >= 60 ? `${Math.floor(mm / 60)}h${String(mm % 60).padStart(2, '0')}` : `${Math.max(1, mm)}m`}` : '';
+        g.fillText(`${r.status} · v${r.version}${time}${tok}`, 1446, y);
         g.textAlign = 'left';
       });
       board.needsUpdate = true;

@@ -127,6 +127,10 @@ schedule. "Not posted after all" undoes it.
 Hawk's review and the tokens each desk used, and Approve or Request changes yourself — your call overrides
 Hawk's and is saved to GitHub.
 
+**Time per Short:** the review screen shows how long each Short took, from its first job to ready-to-post ("Made in
+3 h 10 min"), or how long it has been in the works so far, plus how long each desk worked on it and how long it
+rendered (Time & tokens tab). The pipeline board shows it too.
+
 **Tokens per Short:** after every job the desk's chat shows what it used ("RS-0003 · 1.2M tokens (38k written
 · 1.1M re-read from cache · 85 steps)"); totals per Short are on the pipeline board and the review screen.
 Every Short (and every hand-off) starts a fresh conversation, so earlier Shorts are never re-sent.

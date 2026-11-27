@@ -709,12 +709,23 @@ let reviewing: string | null = null;
 const fmt = (n: number) => (n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `${Math.round(n / 1e3)}k` : String(n));
 /** this team's crew names (each team has its own) */
 const nameOf = (agent: string, team: TeamId = active) => teamAgents(team).find((a) => a.id === agent)?.name ?? crewNames(teams.find((t) => t.id === team)?.crew)[agent as AgentId];
-function usageTable(byAgent: Partial<Record<string, TokenCount>>, total: TokenCount): string {
+/** "3 h 20 min", "12 min", "40 s" */
+function fmtTime(ms: number): string {
+  const m = Math.round(ms / 60_000);
+  if (m < 1) return `${Math.max(1, Math.round(ms / 1000))} s`;
+  if (m < 60) return `${m} min`;
+  const h = Math.floor(m / 60), r = m % 60;
+  if (h < 48) return r ? `${h} h ${r} min` : `${h} h`;
+  return `${Math.floor(h / 24)} d ${h % 24} h`;
+}
+function usageTable(byAgent: Partial<Record<string, TokenCount>>, total: TokenCount, renderMs?: number): string {
   const row = (name: string, t: TokenCount) =>
-    `<tr><td>${name}</td><td>${fmt(t.input + t.output + t.cacheRead + t.cacheWrite)}</td><td>${fmt(t.output)}</td><td>${fmt(t.cacheRead)}</td><td>${t.steps}</td></tr>`;
-  return `<table class="usage-table"><tr><th>Desk</th><th>Total</th><th>Written</th><th>From cache</th><th>Steps</th></tr>${Object.entries(byAgent)
+    `<tr><td>${name}</td><td>${t.ms ? fmtTime(t.ms) : '–'}</td><td>${fmt(t.input + t.output + t.cacheRead + t.cacheWrite)}</td><td>${fmt(t.output)}</td><td>${fmt(t.cacheRead)}</td><td>${t.steps}</td></tr>`;
+  const render = renderMs ? `<tr><td>Rendering (graphics card)</td><td>${fmtTime(renderMs)}</td><td>–</td><td>–</td><td>–</td><td>–</td></tr>` : '';
+  const all = { ...total, ms: (total.ms ?? 0) + (renderMs ?? 0) };
+  return `<table class="usage-table"><tr><th>Desk</th><th>Time</th><th>Total</th><th>Written</th><th>From cache</th><th>Steps</th></tr>${Object.entries(byAgent)
     .map(([k, t]) => row(nameOf(k) ?? k, t!))
-    .join('')}${row('All desks', total)}</table>`;
+    .join('')}${render}${row('All', all)}</table><p class="muted small">Time is how long each desk worked on it, every version included. Between jobs a Short also waits its turn (other Shorts, renders, your review), so start to finish is longer.</p>`;
 }
 /** status -> friendly label + colour group */
 const STATUS: Record<string, [string, string]> = {
@@ -741,7 +752,7 @@ function renderReviewList() {
     li.querySelector('.id')!.textContent = `${r.id} · v${r.version}`;
     setPill(li.querySelector('.pill') as HTMLElement, r.status);
     li.querySelector('.t')!.textContent = r.title;
-    li.title = r.tokens ? `${fmt(r.tokens)} tokens` : '';
+    li.title = [r.madeMs ? `${r.made ? 'made in' : 'in the works for'} ${fmtTime(r.madeMs)}` : '', r.tokens ? `${fmt(r.tokens)} tokens` : ''].filter(Boolean).join(' · ');
     li.onclick = () => void showReview(r.id);
     ul.appendChild(li);
   }
@@ -806,7 +817,15 @@ async function showReview(id: string) {
   // drop the review's own "# RS-0003 v1 review — APPROVED" heading: the header above already says it
   $('#reviewText').innerHTML = info.review ? renderMarkdown(info.review.replace(/^#\s+[^\n]*\n+/, '')) : `<p class="muted">${nameOf('reviewer')} hasn't reviewed this one yet.</p>`;
   $('#publishText').innerHTML = info.publish ? renderMarkdown(info.publish.replace(/^#\s+[^\n]*\n+/, '')) : '';
-  $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total) : '<p class="muted">No token data for this Short yet.</p>';
+  $('#reviewUsage').innerHTML = info.usage ? usageTable(info.usage.byAgent, info.usage.total, info.usage.renderMs) : '<p class="muted">No time or token data for this Short yet.</p>';
+  // how long it took: start (first job) to ready to post; the desks' own working time beside it
+  const u = info.usage, mk = $('#rvMade');
+  mk.hidden = !u?.startedAt;
+  if (u?.startedAt) {
+    const work = (u.total.ms ?? 0) + (u.renderMs ?? 0);
+    mk.textContent = `${u.doneAt ? 'Made in' : 'In the works for'} ${fmtTime((u.doneAt ?? Date.now()) - u.startedAt)}${work ? ` · ${fmtTime(work)} of desk work and rendering` : ''}`;
+    mk.classList.toggle('done', !!u.doneAt);
+  }
   $('#reviewMsg').textContent = '';
 }
 async function openReview() {

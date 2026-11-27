@@ -16,6 +16,7 @@ import type { AgentManager } from './agents';
 import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
 import { crewOf, settingsFor } from './teams';
+import { fmtDuration, markDone, recordRender } from './usage';
 import { renameCrew } from '../shared/types';
 
 type Reg = { shorts: Record<string, { id: string; team?: string; status?: string; error?: string; title?: string; topic?: string; created?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
@@ -192,6 +193,13 @@ export class Pipeline {
         this.agents.post('editor', { kind: 'notice', text: `${m.id}'s render was cut off earlier, so it's queued to render again.` });
       }
       if (stuck.length) reg = this.registry() ?? reg;
+    }
+
+    // the clock on each Short: finished once it's ready to post, running again if it goes back for changes
+    for (const m of Object.values(reg.shorts)) {
+      if (this.owner(m) !== this.team) continue;
+      if (/^(ready_to_publish|queued_buffer|draft_in_buffer|uploaded_scheduled|uploaded_private|published|published_manual)$/.test(m.status ?? '')) markDone(this.team, m.id, true);
+      else if (IN_PRODUCTION.test(m.status ?? '')) markDone(this.team, m.id, false);
     }
 
     // you upload the Shorts yourself: file every one that's ready into its week's folder
@@ -531,6 +539,7 @@ export class Pipeline {
     this.agents.post(editor, { kind: 'notice', text: `Rendering ${id} on the graphics card. This can take a while; you can keep working.` });
     let lastPush = 0;
     this.agents.setExternal(editor, `rendering ${id}`);
+    const t0 = Date.now();
     const r = await renderShort(s.pythonCommand, s.toolkitPath, id, (activity) => {
       const now = Date.now();
       if (now - lastPush > 1500) {
@@ -539,8 +548,9 @@ export class Pipeline {
       }
     });
     this.agents.setExternal(editor, undefined);
+    recordRender(this.team, id, Date.now() - t0);
     if (r.ok) {
-      this.agents.post(editor, { kind: 'notice', text: `${id} is rendered and goes to Hawk for review.` });
+      this.agents.post(editor, { kind: 'notice', text: `${id} is rendered in ${fmtDuration(Date.now() - t0)} and goes to Hawk for review.` });
       if (r.file) this.agents.post(editor, { kind: 'media', path: r.file, source: 'video' });
       await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', id, 'status=in_review']);
     } else {

@@ -262,12 +262,20 @@ export interface TokenCount {
   steps: number;
   /** finished jobs (one per message the agent handled) */
   jobs: number;
+  /** time the desk spent working on it (ms) */
+  ms?: number;
 }
 
 export interface ShortUsage {
   total: TokenCount;
   byAgent: Partial<Record<AgentId, TokenCount>>;
   updated?: number;
+  /** time the graphics card spent rendering it (ms, every version) */
+  renderMs?: number;
+  /** when work on it started (first job) */
+  startedAt?: number;
+  /** when it was finished: ready to post (cleared if it goes back for changes) */
+  doneAt?: number;
 }
 
 export interface ShortRow {
@@ -279,6 +287,10 @@ export interface ShortRow {
   tokens?: number;
   /** rendered video file name (in the render output folder) */
   file?: string;
+  /** how long it took from the first job to ready-to-post (ms); while still in the works, time so far */
+  madeMs?: number;
+  /** true once it's finished (madeMs is final) */
+  made?: boolean;
 }
 
 export interface ReviewInfo {
