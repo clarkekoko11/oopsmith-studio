@@ -957,7 +957,9 @@ function renderTeams() {
     const repo = row.querySelector('.trepo') as HTMLInputElement;
     repo.value = t.toolkitRepo;
     repo.onchange = async () => { teams = await api.setTeamRepo(t.id, repo.value); await api.cloneToolkit(t.id); };
-    row.querySelector('.tstat')!.textContent = `${guard.get(t.id) ? `Paused: ${guard.get(t.id)}` : teamStatus(t.id)} · ${t.toolkitPath}`;
+    const sharing = teams.filter((o) => o.id !== t.id && o.toolkitPath.toLowerCase() === t.toolkitPath.toLowerCase()).map((o) => o.name);
+    row.querySelector('.tstat')!.textContent = `${guard.get(t.id) ? `Paused: ${guard.get(t.id)}` : teamStatus(t.id)} · ${sharing.length ? `same toolkit as ${sharing.join(', ')}` : t.toolkitPath}`;
+    repo.placeholder = 'empty = the main team\'s toolkit';
     (row.querySelector('.go') as HTMLButtonElement).onclick = () => { setActive(t.id); office.focusTeam(t.id); closeTeams(); };
     const rm = row.querySelector('.rm') as HTMLButtonElement;
     rm.hidden = t.id === MAIN_TEAM;

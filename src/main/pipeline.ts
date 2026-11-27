@@ -17,7 +17,7 @@ import { outputDir, renderBusy, renderShort, shortsCmd } from './render';
 import { loadSettings } from './settings';
 import { settingsFor } from './teams';
 
-type Reg = { shorts: Record<string, { id: string; status?: string; error?: string; title?: string; topic?: string; created?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
+type Reg = { shorts: Record<string, { id: string; team?: string; status?: string; error?: string; title?: string; topic?: string; created?: string; file?: string; version?: number; publish_at?: string; buffer_post_id?: string; media_url?: string; youtube_id?: string }> };
 
 /** Statuses that take a day in the one-Short-a-day schedule. */
 export const TAKES_A_DAY = /^(queued_buffer|uploaded_scheduled|published|published_manual)$/;
@@ -43,6 +43,14 @@ export class Pipeline {
   gate: () => string | null = () => null;
   /** upload days already taken across every team (set by main) */
   takenDays: () => Set<string> = () => new Set();
+  /** Teams can share one toolkit, each with its own Shorts (set by main): which team a Short belongs to */
+  owner: (m: { id: string; team?: string }) => TeamId = () => this.team;
+  /** another team's desk is working on this Short right now */
+  busyElsewhere: (id: string) => boolean = () => false;
+  /** this team is the first one on its toolkit (does the once-per-toolkit jobs) */
+  firstOnToolkit: () => boolean = () => true;
+  /** a Short of this team, that no other team is busy with */
+  private mine(m: { id: string; team?: string }) { return this.owner(m) === this.team && !this.busyElsewhere(m.id); }
 
   /** Shorts you pressed Upload for (when automatic upload is off) */
   private uploadNow = new Set<string>();
@@ -161,11 +169,19 @@ export class Pipeline {
     if (!reg) return;
     this.why.clear();
     const allowed = (id: string) => s.autopilot || this.manual.has(id);
-    const by = (st: string) => Object.values(reg!.shorts).filter((m) => m.status === st && allowed(m.id)).map((m) => m.id).sort();
+    const by = (st: string) => Object.values(reg!.shorts).filter((m) => m.status === st && allowed(m.id) && this.mine(m)).map((m) => m.id).sort();
+
+    // a new Short Scripty just created belongs to this team (he also records it himself with team=<id>)
+    const writing = this.agents.currentWork('script-writer');
+    const w = writing ? reg.shorts[writing] : undefined;
+    if (w && !w.team && /^(planned|scripted|voiced)$/.test(w.status ?? '') && this.attempt('claim', w.id, 1)) {
+      await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', w.id, `team=${this.team}`]);
+      w.team = this.team;
+    }
     for (const id of [...this.manual]) if (/^(published|published_manual|queued_buffer|draft_in_buffer|uploaded_scheduled|uploaded_private)$/.test(reg.shorts[id]?.status ?? '')) this.manual.delete(id);
 
     // a render that was cut off (app closed, PC restarted) is stuck at "rendering": queue it again
-    if (!renderBusy()) {
+    if (!renderBusy() && this.firstOnToolkit()) {
       const stuck = Object.values(reg.shorts).filter((m) => m.status === 'rendering' && this.attempt('unstick', `${m.id}v${m.version ?? 1}`, 1));
       for (const m of stuck) {
         await shortsCmd(s.pythonCommand, s.toolkitPath, ['set', m.id, 'status=ready_to_render']);
@@ -193,11 +209,12 @@ export class Pipeline {
     const writer: AgentId = 'script-writer';
     if (s.autopilot && this.agents.isIdle(writer)) {
       const recent = (m: Reg['shorts'][string]) => !m.created || Date.now() - Date.parse(m.created) < 4 * 86_400_000;
-      const unfinished = Object.values(reg.shorts).filter((m) => /^(planned|scripted)$/.test(m.status ?? '') && recent(m)).map((m) => m.id).sort()
+      // only this team's own (or, for the first team, unclaimed ones nobody is working on)
+      const unfinished = Object.values(reg.shorts).filter((m) => /^(planned|scripted)$/.test(m.status ?? '') && recent(m) && this.mine(m)).map((m) => m.id).sort()
         .find((id) => this.attempt('script', id, 1));
       if (unfinished) {
         await this.agents.send(writer, scriptResume(unfinished), `Pick up ${unfinished} where it stopped`, { fresh: true, short: unfinished });
-      } else if (s.backlogAuto) {
+      } else if (s.backlogAuto && this.firstOnToolkit()) {
         const left = readyCards(s.toolkitPath).length;
         const d = new Date();
         const day = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -224,7 +241,7 @@ export class Pipeline {
     const publisher: AgentId = 'publisher';
     if (this.agents.isIdle(publisher) && !publishBusy()) {
       const needDetails = by('approved').find((id) => this.attempt('details', id, 2));
-      const retry = Object.values(reg.shorts).filter((m) => m.status === 'publish_failed' && this.manual.has(m.id)).map((m) => m.id);
+      const retry = Object.values(reg.shorts).filter((m) => m.status === 'publish_failed' && this.manual.has(m.id) && this.mine(m)).map((m) => m.id);
       const ready = [...by('ready_to_publish'), ...retry].find((id) => (s.youtubeAutoUpload || this.uploadNow.has(id) || this.manual.has(id)) && this.attempt('publish', `${id}v${reg.shorts[id].version ?? 1}`, 2));
       if (ready && s.publishVia !== 'manual' && !publishSetupMissing(s)) {
         void (s.publishVia === 'buffer' ? this.publish(ready) : this.uploadYouTube(ready));
@@ -395,7 +412,7 @@ export class Pipeline {
     if (!youtubeStatus(s.toolkitPath).signedIn) return;
     const now = Date.now();
     for (const m of Object.values(reg.shorts)) {
-      if (m.status !== 'uploaded_scheduled' || !m.youtube_id || !m.publish_at) continue;
+      if (m.status !== 'uploaded_scheduled' || !m.youtube_id || !m.publish_at || this.owner(m) !== this.team) continue;
       if (Date.parse(m.publish_at) > now - 10 * 60_000) continue;
       if (now - (this.lastPoll.get(m.id) ?? 0) < 30 * 60_000) continue;
       this.lastPoll.set(m.id, now);
@@ -448,7 +465,7 @@ export class Pipeline {
     const s = this.settings();
     const now = Date.now();
     for (const m of Object.values(reg.shorts)) {
-      if (m.status !== 'queued_buffer' || !m.buffer_post_id) continue;
+      if (m.status !== 'queued_buffer' || !m.buffer_post_id || this.owner(m) !== this.team) continue;
       if (m.publish_at && Date.parse(m.publish_at) > now - 5 * 60_000) continue;
       if (now - (this.lastPoll.get(m.id) ?? 0) < 30 * 60_000) continue;
       this.lastPoll.set(m.id, now);
@@ -474,7 +491,7 @@ export class Pipeline {
     const s = this.settings();
     if (s.publishVia !== 'manual') return;
     for (const m of Object.values(reg.shorts).sort((a, b) => a.id.localeCompare(b.id))) {
-      if (m.status !== 'ready_to_publish' || !m.file) continue;
+      if (m.status !== 'ready_to_publish' || !m.file || this.owner(m) !== this.team) continue;
       const v = m.version ?? 1;
       const prev = planEntry(this.team, m.id);
       if (prev && prev.version === v && prev.video && existsSync(prev.video)) {

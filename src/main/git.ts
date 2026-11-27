@@ -66,7 +66,10 @@ export async function cloneToolkit(repo: string, dest: string, progress: (l: str
 }
 
 /** Fast-forward to the latest commit. Skips (with a note) when you have uncommitted changes. */
-export async function pullToolkit(dir: string): Promise<GitResult> {
+export function pullToolkit(dir: string): Promise<GitResult> {
+  return serial(dir, () => pullNow(dir));
+}
+async function pullNow(dir: string): Promise<GitResult> {
   if (!existsSync(join(dir, '.git'))) return { ok: false, message: 'The toolkit folder is not a Git clone, so it was not updated.' };
   const st = await git(['status', '--porcelain'], dir);
   if (st.code !== 0) return { ok: false, message: 'Git could not read the toolkit folder.' };
@@ -76,11 +79,39 @@ export async function pullToolkit(dir: string): Promise<GitResult> {
   return { ok: true, message: /Already up to date/i.test(r.out) ? 'Toolkit is up to date.' : 'Toolkit updated from GitHub.' };
 }
 
-/** Commit some paths and push (used when you approve or request changes from the review screen). */
-export async function commitAndPush(dir: string, paths: string[], message: string): Promise<GitResult> {
-  await git(['add', ...paths], dir);
-  const c = await git(['-c', 'user.name=Oopsmith Studio', '-c', 'user.email=studio@localhost', 'commit', '-m', message], dir);
-  if (c.code !== 0 && !/nothing to commit/i.test(c.out)) return { ok: false, message: 'Could not commit.' };
-  const p = await git(['push'], dir);
-  return p.code === 0 ? { ok: true, message: 'Saved to GitHub.' } : { ok: false, message: 'Saved locally; push to GitHub failed.' };
+/** One git job at a time per folder: several teams (and their agents) can share one toolkit clone. */
+const queues = new Map<string, Promise<unknown>>();
+function serial<T>(dir: string, job: () => Promise<T>): Promise<T> {
+  const k = dir.toLowerCase();
+  const next = (queues.get(k) ?? Promise.resolve()).catch(() => {}).then(job);
+  queues.set(k, next);
+  return next;
+}
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+/** An agent's git command can hold .git/index.lock for a moment: wait and try again. */
+async function gitRetry(args: string[], dir: string) {
+  let r = await git(args, dir);
+  for (let i = 0; i < 6 && r.code !== 0 && /index\.lock|another git process/i.test(r.out); i++) {
+    await sleep(1500);
+    r = await git(args, dir);
+  }
+  return r;
+}
+
+/** Commit some paths (only those, never what someone else staged) and push. */
+export function commitAndPush(dir: string, paths: string[], message: string): Promise<GitResult> {
+  return serial(dir, async () => {
+    const existing = paths.filter((p) => existsSync(join(dir, p)));
+    if (!existing.length) return { ok: true, message: 'Nothing to save.' };
+    await gitRetry(['add', '--', ...existing], dir);
+    const c = await gitRetry(['-c', 'user.name=Oopsmith Studio', '-c', 'user.email=studio@localhost', 'commit', '-m', message, '--', ...existing], dir);
+    if (c.code !== 0 && !/nothing to commit|no changes added/i.test(c.out)) return { ok: false, message: 'Could not commit.' };
+    let p = await gitRetry(['push'], dir);
+    if (p.code !== 0 && /rejected|fetch first|non-fast-forward/i.test(p.out)) {
+      // someone pushed in between (another PC): catch up, then push again
+      await gitRetry(['pull', '--rebase', '--autostash'], dir);
+      p = await gitRetry(['push'], dir);
+    }
+    return p.code === 0 ? { ok: true, message: 'Saved to GitHub.' } : { ok: false, message: 'Saved locally; push to GitHub failed.' };
+  });
 }

@@ -1,4 +1,6 @@
-// Teams: each team is one full line of four desks (Scripty, Cutter, Hawk, Pip) working on its own toolkit repo.
+// Teams: each team is one full line of four desks (Scripty, Cutter, Hawk, Pip). By default every team works in the
+// SAME toolkit as the main team, each on its own Shorts (the registry records which team a Short belongs to), so more
+// teams = more Shorts in parallel. A team can still be given its own toolkit repo.
 // The main team uses the original settings (toolkitRepo / toolkitPath), so existing installs keep working unchanged.
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -26,25 +28,36 @@ export function settingsFor(team: TeamId): Settings {
   return t ? { ...s, toolkitRepo: t.toolkitRepo, toolkitPath: t.toolkitPath } : s;
 }
 
+const norm = (p: string) => p.replace(/[\\/]+$/, '').toLowerCase();
+/** Teams working in this toolkit folder, in studio order (the first one owns Shorts nobody claimed). */
+export function teamsOnToolkit(path: string, all: TeamConfig[] = listTeams()): TeamConfig[] {
+  return all.filter((t) => norm(t.toolkitPath) === norm(path));
+}
+/** Does this team share its toolkit with another team? */
+export const sharesToolkit = (team: TeamId) => { const t = getTeam(team); return !!t && teamsOnToolkit(t.toolkitPath).length > 1; };
+/** One team per toolkit folder (for jobs that should run once per toolkit: pulling it, reading its registry). */
+export function uniqueToolkits(all: TeamConfig[] = listTeams()): TeamConfig[] {
+  const seen = new Set<string>();
+  return all.filter((t) => { const k = norm(t.toolkitPath); if (seen.has(k)) return false; seen.add(k); return true; });
+}
+
 const slug = (name: string) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24) || 'team';
 
 export function addTeam(name: string, repo: string): { ok: boolean; message: string; team?: TeamConfig } {
   const s = loadSettings();
   const teams = s.teams ?? [];
   const n = name.trim();
-  const r = repo.trim().replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
+  // blank = the main team's toolkit (the usual case: every team works in the same toolkit, on different Shorts)
+  const r = (repo.trim() || s.toolkitRepo).replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
   if (!n) return { ok: false, message: 'Give the team a name.' };
-  if (!r) return { ok: false, message: 'Which GitHub toolkit repo should this team work in? (owner/repo)' };
   if (teams.length + 1 >= MAX_TEAMS) return { ok: false, message: `Up to ${MAX_TEAMS} teams fit in the studio.` };
-  const repos = listTeams(s).map((t) => t.toolkitRepo.toLowerCase());
-  if (repos.includes(r.toLowerCase())) {
-    return { ok: false, message: `Another team already works in ${r}. Each team needs its own toolkit repo so their Shorts never collide.` };
-  }
   let id = slug(n);
   while (id === MAIN_TEAM || teams.some((t) => t.id === id)) id = `${id}-${Math.floor(Math.random() * 90 + 10)}`;
-  const team: TeamConfig = { id, name: n, toolkitRepo: r, toolkitPath: join(homedir(), 'OopsmithStudio', 'teams', id, r.split('/').pop() || 'toolkit') };
+  // a repo another team already uses: work in that same folder
+  const same = listTeams(s).find((t) => t.toolkitRepo.toLowerCase() === r.toLowerCase());
+  const team: TeamConfig = { id, name: n, toolkitRepo: same?.toolkitRepo ?? r, toolkitPath: same?.toolkitPath ?? join(homedir(), 'OopsmithStudio', 'teams', id, r.split('/').pop() || 'toolkit') };
   saveSettings({ teams: [...teams, team] });
-  return { ok: true, message: `${n} joined the studio.`, team };
+  return { ok: true, message: same ? `${n} joined the studio, working in the same toolkit as ${same.name} on its own Shorts.` : `${n} joined the studio.`, team };
 }
 
 export function renameTeam(id: TeamId, name: string): TeamConfig[] {
@@ -56,10 +69,20 @@ export function renameTeam(id: TeamId, name: string): TeamConfig[] {
 }
 
 export function setTeamRepo(id: TeamId, repo: string): TeamConfig[] {
-  const r = repo.trim();
+  const s = loadSettings();
+  // blank on an extra team = back to the main team's toolkit
+  const r = (repo.trim() || (id === MAIN_TEAM ? '' : s.toolkitRepo)).replace(/^https:\/\/github\.com\//, '').replace(/\.git$/, '');
   if (!r) return listTeams();
-  if (id === MAIN_TEAM) saveSettings({ toolkitRepo: r });
-  else saveSettings({ teams: (loadSettings().teams ?? []).map((t) => (t.id === id ? { ...t, toolkitRepo: r } : t)) });
+  if (id === MAIN_TEAM) { saveSettings({ toolkitRepo: r }); return listTeams(); }
+  const same = listTeams(s).find((t) => t.id !== id && t.toolkitRepo.toLowerCase() === r.toLowerCase());
+  saveSettings({
+    teams: (s.teams ?? []).map((t) => {
+      if (t.id !== id) return t;
+      if (same) return { ...t, toolkitRepo: same.toolkitRepo, toolkitPath: same.toolkitPath };   // share that folder
+      const own = norm(t.toolkitPath) === norm(s.toolkitPath) || listTeams(s).some((o) => o.id !== id && norm(o.toolkitPath) === norm(t.toolkitPath));
+      return { ...t, toolkitRepo: r, toolkitPath: own ? join(homedir(), 'OopsmithStudio', 'teams', id, r.split('/').pop() || 'toolkit') : t.toolkitPath };
+    }),
+  });
   return listTeams();
 }
 

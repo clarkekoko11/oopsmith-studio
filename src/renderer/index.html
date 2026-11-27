@@ -127,15 +127,15 @@
   <div id="teams" class="modal" hidden>
     <div class="sheet" role="dialog" aria-labelledby="teamsTitle">
       <div class="sheet-head"><h2 id="teamsTitle">Teams <span class="count" id="teamCount"></span></h2><button class="icon sm" id="closeTeams" aria-label="Close"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></button></div>
-      <p class="muted">Each team is a full production line working in its own toolkit repo, side by side in the studio. Teams work in parallel; renders and uploads take turns, and every extra team uses your Claude plan faster.</p>
+      <p class="muted">Each team is a full production line of four agents. Teams work in the <b>same toolkit</b> by default, each on its own Shorts, so more teams make more Shorts at once (they take turns choosing stories, renders and uploads). Every extra team uses your Claude plan faster; give it its own Claude account if you have one.</p>
       <div id="teamList"></div>
       <div class="add-team">
         <h3>Add a team</h3>
         <div class="two">
           <label>Name <input id="newTeamName" placeholder="Team Two" /></label>
-          <label>Toolkit repo on GitHub <input id="newTeamRepo" placeholder="owner/repo" /></label>
+          <label>Toolkit repo <input id="newTeamRepo" placeholder="leave empty: same toolkit as the main team" /></label>
         </div>
-        <div class="row"><button id="addTeamBtn" class="btn primary">Add team</button><p class="muted small" id="teamMsg">Use a separate repo per team so their Shorts never collide.</p></div>
+        <div class="row"><button id="addTeamBtn" class="btn primary">Add team</button><p class="muted small" id="teamMsg">Leave the repo empty to share the main team's toolkit (recommended).</p></div>
       </div>
     </div>
   </div>

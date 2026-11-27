@@ -16,16 +16,21 @@ export const agentMeta = (id: AgentId) => AGENTS.find((a) => a.id === id)!;
 export const LIVE_PHASE = 4;
 
 /** Bump when instructions change: sessions made with older instructions are restarted. */
-export const PROMPT_VERSION = 12;
+export const PROMPT_VERSION = 13;
 
 export const AUTOPILOT_TAG = '[AUTOPILOT]';
 
+/** Several teams can share the toolkit, each with its own Shorts: a new Short is marked as this team's. */
+const claim = (team: string) =>
+  ` Right after you create the Short's ID, mark it as your team's: \`python tools/shorts.py set <ID> team=${team}\` (use the usual Python command).`;
+
 /** The message that starts a hands-off daily run. */
 export const DAILY_KICKOFF = `${AUTOPILOT_TAG} Make today's Short from start to finish without asking me anything.`;
+export const dailyKickoff = (team: string) => `${DAILY_KICKOFF}${claim(team)}`;
 
 /** The daily run, from a story already researched on the backlog. */
-export const backlogKickoff = (card: { id: string; title: string }) =>
-  `${AUTOPILOT_TAG} Make today's Short from backlog card ${card.id} ("${card.title}") in shorts/backlog.json, from start to finish without asking me anything. Its summary and sources are already there: open those sources to confirm the facts instead of searching from scratch (search only for what they don't cover). Right after you create the Short's ID, set that card's "status" to "used" and "short" to the ID in shorts/backlog.json, and commit backlog.json together with the Short. If the story doesn't hold up, set the card's status to "vetoed" with a "note" saying why and take the next ready card.`;
+export const backlogKickoff = (card: { id: string; title: string }, team: string) =>
+  `${AUTOPILOT_TAG}${claim(team)} Make today's Short from backlog card ${card.id} ("${card.title}") in shorts/backlog.json, from start to finish without asking me anything. Its summary and sources are already there: open those sources to confirm the facts instead of searching from scratch (search only for what they don't cover). Right after you create the Short's ID, set that card's "status" to "used" and "short" to the ID in shorts/backlog.json, and commit backlog.json together with the Short. If the story doesn't hold up, set the card's status to "vetoed" with a "note" saying why and take the next ready card.`;
 
 /** Research stories ahead of time (one lighter job for several Shorts). */
 export const backlogRefill = (n: number) =>
@@ -68,7 +73,20 @@ function scriptSkill(toolkit: string, resourcesDir: string): string {
 
 type Ctx = { toolkit: string; python: string; resourcesDir: string; today: string };
 
+/** Every desk: the toolkit may be shared by several teams working on other Shorts at the same moment. */
+const SHARED = `
+## Shared toolkit
+Other teams may be working in this same toolkit on their own Shorts at the same time. Only touch your Short's files
+(shorts/<ID>/, files named after its <name>) plus the shared registry through tools/shorts.py. Never edit, render,
+commit or "fix" another Short. Stage only your own paths with git add (never "git add -A" or "git add ."). If a git
+command fails because another git process is running (index.lock) or the push is rejected, wait a few seconds
+(\`python -c "import time; time.sleep(5)"\`), run \`git pull --rebase --autostash\` if it was the push, and try again.`;
+
 export function instructions(id: AgentId, ctx: Ctx): string {
+  return instructionsFor(id, ctx) + '\n' + SHARED.trim();
+}
+
+function instructionsFor(id: AgentId, ctx: Ctx): string {
   if (id === 'editor') return editorInstructions(ctx);
   if (id === 'reviewer') return reviewerInstructions(ctx);
   if (id === 'publisher') return publisherInstructions(ctx);
@@ -196,12 +214,14 @@ Fix and render-failure jobs (below) are single jobs as before.
    \`${py} tools/transcribe.py vo/<name>.wav vo/<name>_words.json\` and copy the words to shorts/<ID>/words.json.
    Note mis-hearings for the caption --fix flags.
 3. Plan the shot list from the word timings (skill step 3), opening on the hook.
-4. Build what the story needs (skill step 4): cast JSONs in shorts/<ID>/characters/ (built to assets/ with
-   \`${py} blender/build_character_v2.py <json> assets/<name>.glb\` or random_character.py), reused or new
+4. Build what the story needs (skill step 4): cast JSONs in shorts/<ID>/characters/, each named <name>_<role>.json
+   (e.g. rs0012_captain.json) so its GLB never overwrites another Short's: other teams build Shorts in this same
+   toolkit at the same time (built to assets/ with
+   \`${py} blender/build_character_v2.py <json> assets/<name>_<role>.glb\` or random_character.py), reused or new
    sets (\`blender/build_<set>.py\`, built to assets/), and the story at src/stories/<name>.js.
 5. Still checks (skill step 5) until clean: \`node tools/build_short.mjs src/stories/<name>.js dist/<name>.html <name> key=assets/x.glb ...\`,
-   \`${py} tools/record_short.py dist/<name>.html out/chk --stills <one time per shot> --q "&nocap"\`,
-   \`${py} tools/sheet.py out/chk out/chk.png\`, then open out/chk.png with the Read tool and LOOK at it:
+   \`${py} tools/record_short.py dist/<name>.html out/chk_<name> --stills <one time per shot> --q "&nocap"\`,
+   \`${py} tools/sheet.py out/chk_<name> out/chk_<name>.png\`, then open out/chk_<name>.png with the Read tool and LOOK at it:
    clipping, framing, lighting, story match. Fix and repeat. At most 2 rounds; if a shot still isn't right,
    simplify it. Look at the contact sheet only, never at single frames one by one.
 6. Sound and captions (skill step 6): audio/cues_<name>.py and
@@ -231,7 +251,7 @@ Messages without ${AUTOPILOT_TAG} are normal chat.
 - Every step re-sends the whole conversation, so keep it small: read only the parts of files you need
   (Grep first, then Read with offset/limit), and never re-read a file you already have.
 - Commands that print a lot (Blender builds, transcription, build_short, record_short) must write to a log
-  file: add \`--log\` options where the tool has them, otherwise end the command with \`> out/log_<step>.txt 2>&1\`.
+  file: add \`--log\` options where the tool has them, otherwise end the command with \`> out/log_<name>_<step>.txt 2>&1\` (with the Short's name: other teams use out/ too).
   If it fails, Read only the last ~40 lines of that log.
 - Write the story file in one go from your shot plan; edit only the shots that need fixing afterwards.
 

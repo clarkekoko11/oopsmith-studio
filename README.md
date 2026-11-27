@@ -80,8 +80,11 @@ itself at the reset time.
 
 ## Teams
 **Team chip (top left) → Teams** to add up to four teams, rename them, or remove them (back down to one). Each team is a
-full line of four agents working in **its own toolkit repo** (so Short IDs never collide), and **teams work in
-parallel**. Renders take turns on your graphics card and uploads take turns too. Every extra team uses your Claude
+full line of four agents, and **teams work in parallel in the same toolkit**, each on **its own Shorts** (leave the repo
+empty when adding a team; a separate repo is still possible). Each Short records its team in the registry
+(`team=<id>`), each team's board and review list show its own Shorts, the Scriptys take turns choosing their stories
+(and never get the same backlog card), and only the first team refills the backlog. The registry is locked while it's
+written and git commits take turns, so the teams don't overwrite each other. Renders take turns on your graphics card and uploads take turns too. Every extra team uses your Claude
 plan faster. The top bar, review screen and Settings → Toolkit act on the active team (click an agent or a team's
 review screen to switch). The daily run starts a Short for every team. Removing a team stops its desks; its toolkit
 clone and chats stay on the PC. The main team keeps the original settings, chats and folders.

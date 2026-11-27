@@ -8,7 +8,7 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { MAIN_TEAM, type AccountState, type AgentEvent, type AgentId, type CelebrateEvent, type GuardState, type ProfileState, type Settings, type ShortRow, type TeamId, type UsageState } from '../shared/types';
 import { checkAccount } from './account';
-import { backlogKickoff, backlogRefill, DAILY_KICKOFF } from './agentDefs';
+import { backlogKickoff, backlogRefill, dailyKickoff } from './agentDefs';
 import { IN_PRODUCTION, Pipeline, TAKES_A_DAY, type PipelineEvent } from './pipeline';
 import { BACKLOG_FILE, readBacklog, readyCards, writeBacklog } from './backlog';
 import { lastUsage, pausedReason, pendingResets, recordUsage, resetMs } from './guard';
@@ -29,7 +29,7 @@ import { claudeExecutable } from './sdk';
 import { AgentManager } from './agents';
 import { inside } from './permissions';
 import { loadSettings, saveSettings, setGeminiKey, testGeminiKey } from './settings';
-import { addTeam, listTeams, removeTeam, renameTeam, setTeamPath, setTeamRepo, settingsFor } from './teams';
+import { addTeam, listTeams, removeTeam, renameTeam, setTeamPath, setTeamRepo, settingsFor, teamsOnToolkit, uniqueToolkits } from './teams';
 
 const here = dirname(fileURLToPath(import.meta.url));
 let win: BrowserWindow | undefined;
@@ -87,7 +87,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'toolkit', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
 ]);
 
-const send = (channel: string, payload: unknown) => win?.webContents.send(channel, payload);
+const send = (channel: string, payload: unknown) => { if (win && !win.isDestroyed()) win.webContents.send(channel, payload); };
 const helper = (f: string) => join(app.getAppPath(), 'resources', f).replace(`app.asar${sep}`, `app.asar.unpacked${sep}`);
 
 /** One crew per team: its four desks and the pipeline that moves its Shorts between them. Teams run in parallel;
@@ -116,6 +116,10 @@ function makeCrew(team: TeamId): Crew {
   pipeline.gate = () => pausedReason(team, listTeams());
   pipeline.takenDays = () => takenDaysAll();
   pipeline.onEvent = (e) => void onPipelineEvent(team, e);
+  // teams sharing a toolkit: each works on its own Shorts
+  pipeline.owner = (m) => ownerOf(team, m);
+  pipeline.firstOnToolkit = () => teamsOnToolkit(settingsFor(team).toolkitPath)[0]?.id === team;
+  pipeline.busyElsewhere = (id) => [...crews.entries()].some(([t, c]) => t !== team && sameToolkit(t, team) && (['script-writer', 'editor', 'reviewer', 'publisher'] as AgentId[]).some((a) => c.agents.currentWork(a) === id));
   pipeline.onBlocked = (message) => {
     send('pipeline:blocked', { team, message });
     agents.post('editor', { kind: 'notice', tone: 'warn', text: message });
@@ -144,8 +148,16 @@ const crew = (team: TeamId | undefined): Crew => crews.get(team || MAIN_TEAM) ??
 /** Any team's work can free the graphics card, so every finished job nudges every team. */
 const tickAll = async () => { for (const c of crews.values()) await c.pipeline.tick(); };
 
-// ---------------- registries of every team (for the weekly plan, quota and milestones)
-type RegShort = { id: string; status?: string; title?: string; topic?: string; publish_at?: string; file?: string; version?: number };
+// ---------------- teams sharing one toolkit: each Short belongs to one team (registry "team"; unclaimed = the first team)
+const sameToolkit = (a: TeamId, b: TeamId) => settingsFor(a).toolkitPath.toLowerCase() === settingsFor(b).toolkitPath.toLowerCase();
+function ownerOf(team: TeamId, m: { team?: string }): TeamId {
+  const on = teamsOnToolkit(settingsFor(team).toolkitPath);
+  if (on.length < 2) return team;
+  return m.team && on.some((t) => t.id === m.team) ? m.team : on[0].id;
+}
+
+// ---------------- registries of every toolkit (for the weekly plan, quota and milestones)
+type RegShort = { id: string; team?: string; status?: string; title?: string; topic?: string; publish_at?: string; file?: string; version?: number };
 function registryOf(team: TeamId): Record<string, RegShort> {
   try { return JSON.parse(readFileSync(join(settingsFor(team).toolkitPath, 'shorts', 'registry.json'), 'utf8')).shorts ?? {}; } catch { return {}; }
 }
@@ -153,15 +165,15 @@ function registryOf(team: TeamId): Record<string, RegShort> {
 function takenDaysAll(): Set<string> {
   const tz = loadSettings().audienceTimezone;
   const days = plannedDays();
-  for (const t of listTeams()) for (const m of Object.values(registryOf(t.id))) if (m.publish_at && TAKES_A_DAY.test(m.status ?? '')) days.add(dayKey(Date.parse(m.publish_at), tz));
+  for (const t of uniqueToolkits()) for (const m of Object.values(registryOf(t.id))) if (m.publish_at && TAKES_A_DAY.test(m.status ?? '')) days.add(dayKey(Date.parse(m.publish_at), tz));
   return days;
 }
 /** Shorts still being made, on every team (ready-to-post ones not yet filed count too). */
 function inProduction(): number {
   let n = 0;
-  for (const t of listTeams()) for (const m of Object.values(registryOf(t.id))) {
+  for (const t of uniqueToolkits()) for (const m of Object.values(registryOf(t.id))) {
     if (IN_PRODUCTION.test(m.status ?? '')) n++;
-    else if (m.status === 'ready_to_publish' && !planEntry(t.id, m.id)) n++;
+    else if (m.status === 'ready_to_publish' && !planEntry(ownerOf(t.id, m), m.id)) n++;
   }
   return n;
 }
@@ -169,7 +181,7 @@ const sendPlan = () => send('plan', planState(inProduction()));
 /** Shorts that are out (posted by you or published), all teams. */
 function postedCount(): number {
   let n = 0;
-  for (const t of listTeams()) for (const m of Object.values(registryOf(t.id))) if (/^(published|published_manual)$/.test(m.status ?? '')) n++;
+  for (const t of uniqueToolkits()) for (const m of Object.values(registryOf(t.id))) if (/^(published|published_manual)$/.test(m.status ?? '')) n++;
   return n;
 }
 /** studio upgrades unlock at these counts (the office shows them; see world.ts) */
@@ -320,7 +332,7 @@ async function doSync(team: TeamId) {
 async function moveRenders(from: string[], to: string): Promise<number> {
   mkdirSync(to, { recursive: true });
   let n = 0;
-  for (const t of listTeams()) {
+  for (const t of uniqueToolkits()) {
     for (const m of Object.values(registryOf(t.id))) {
       if (!m.file) continue;
       const src = from.map((d) => join(d, m.file!)).find((p) => existsSync(p) && dirname(p) !== to);
@@ -375,9 +387,10 @@ function shorts(team: TeamId): ShortRow[] {
   const usage = allUsage(team);
   try {
     const reg = JSON.parse(readFileSync(join(root, 'shorts', 'registry.json'), 'utf8')) as {
-      shorts: Record<string, { id: string; title?: string; topic?: string; status?: string; version?: number; file?: string; youtube_id?: string }>;
+      shorts: Record<string, { id: string; team?: string; title?: string; topic?: string; status?: string; version?: number; file?: string; youtube_id?: string }>;
     };
     return Object.values(reg.shorts)
+      .filter((s) => ownerOf(team, s) === team)   // a shared toolkit: each team's board shows its own Shorts
       .map((s) => {
         const u = usage[s.id];
         return { id: s.id, title: s.title || s.topic || '(untitled)', status: s.status || 'new', version: s.version || 1, tokens: u ? totalTokens(u.total) : undefined, file: s.file };
@@ -811,9 +824,15 @@ function aheadCount(): number {
 }
 let quotaNoticeDay = '';
 /** 'started', 'busy' (Scripty is working), or why it didn't start. */
+/** Backlog cards handed to a team's Scripty and not used yet (so two teams never take the same story). */
+const cardTaken = new Map<string, TeamId>();
 async function runDaily(team: TeamId, reason: 'manual' | 'schedule', cardId?: string): Promise<string> {
   const { agents } = crew(team);
   if (!agents.isIdle('script-writer')) return 'busy';
+  // teams sharing the toolkit take turns choosing a story: wait while another team's Scripty is still picking his
+  // (working, but no Short ID yet), so two of them never pick the same one
+  const picking = listTeams().find((t) => t.id !== team && sameToolkit(t.id, team) && !crew(t.id).agents.isIdle('script-writer') && !crew(t.id).agents.currentWork('script-writer'));
+  if (picking && !cardId) return reason === 'schedule' ? 'busy' : `${picking.name}'s Scripty is choosing a story right now (you share a toolkit). Try again in a minute.`;
   const paused = pausedReason(team, listTeams());
   if (paused && reason === 'schedule') return `Waiting: ${paused}`;
   const s = loadSettings();
@@ -826,25 +845,42 @@ async function runDaily(team: TeamId, reason: 'manual' | 'schedule', cardId?: st
     return 'quota';
   }
   const cards = readyCards(settingsFor(team).toolkitPath);
-  const card = cardId ? cards.find((c) => c.id === cardId) : cards[0];
+  const ready = new Set(cards.map((c) => c.id));
+  for (const k of [...cardTaken.keys()]) if (!ready.has(k.split('|')[1])) cardTaken.delete(k);   // used or set aside
+  const key = (id: string) => `${settingsFor(team).toolkitPath.toLowerCase()}|${id}`;
+  const card = cardId ? cards.find((c) => c.id === cardId) : cards.find((c) => !cardTaken.has(key(c.id)) || cardTaken.get(key(c.id)) === team);
   if (cardId && !card) return 'That story is no longer on the backlog.';
-  const text = card ? backlogKickoff(card) : DAILY_KICKOFF;
+  if (cardId && cardTaken.has(key(cardId)) && cardTaken.get(key(cardId)) !== team) return 'Another team is already making that story.';
+  if (card) cardTaken.set(key(card.id), team);
+  const text = card ? backlogKickoff(card, team) : dailyKickoff(team);
   const label = card ? `${reason === 'schedule' ? 'Daily run: ' : ''}Make a Short from ${card.id}: ${card.title}` : reason === 'schedule' ? "Daily run: make today's Short" : "Make today's Short";
   return (await agents.send('script-writer', text, label, { fresh: true })) ? 'started' : 'not started';
 }
 setInterval(() => void tickAll(), 60_000);
+// which teams already started today's run (kept on disk, so a restart mid-day doesn't start a second Short)
+const dailyFile = () => join(app.getPath('userData'), 'daily.json');
+let dailyDay = '';
+const dailyDone = new Set<TeamId>();
+try { const d = JSON.parse(readFileSync(dailyFile(), 'utf8')); dailyDay = d.day; for (const t of d.done ?? []) dailyDone.add(t); } catch { /* none yet */ }
+const saveDaily = () => { try { writeFileSync(dailyFile(), JSON.stringify({ day: dailyDay, done: [...dailyDone] })); } catch { /* best effort */ } };
 setInterval(() => {
   const s = loadSettings();
   if (!s.autopilot || !/^\d{1,2}:\d{2}$/.test(s.dailyTime) || s.lastDailyRun === today()) return;
   const [h, m] = s.dailyTime.split(':').map(Number);
   const now = new Date();
   if (now.getHours() * 60 + now.getMinutes() < h * 60 + m) return;
-  // every team makes its own Short each day, in parallel (each on its own Claude account)
-  const ready = listTeams().filter((t) => (accounts.get(teamProfile(t.id)) ?? (teamProfile(t.id) ? undefined : account))?.signedIn);
+  // every team makes its own Short each day, in parallel (each on its own Claude account); teams sharing a toolkit
+  // take turns choosing their story. A team counts as done for today once its run started (or was skipped).
+  if (dailyDay !== today()) { dailyDay = today(); dailyDone.clear(); }
+  const ready = listTeams().filter((t) => !dailyDone.has(t.id) && (accounts.get(teamProfile(t.id)) ?? (teamProfile(t.id) ? undefined : account))?.signedIn);
   if (!ready.length) return;
-  void Promise.all(ready.map((t) => runDaily(t.id, 'schedule'))).then((r) => {
-    if (r.every((x) => x !== 'busy' && !x.startsWith('Waiting'))) saveSettings({ lastDailyRun: today() });
-  });
+  void (async () => {
+    for (const t of ready) {
+      const r = await runDaily(t.id, 'schedule');
+      if (r !== 'busy' && !r.startsWith('Waiting')) { dailyDone.add(t.id); saveDaily(); }
+    }
+    if (listTeams().every((t) => dailyDone.has(t.id))) saveSettings({ lastDailyRun: today() });
+  })();
 }, 60_000);
 // upload-day reminders when you post the Shorts yourself
 setInterval(() => {
